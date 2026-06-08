@@ -7,6 +7,7 @@ import time
 from fastapi import APIRouter, Depends
 from pydantic import BaseModel, Field
 
+from internal.api.auth_middleware import validate_session
 from internal.api.dependencies import get_assistant
 from internal.core.helper_agent import Answer, HelperAgent, Question
 from internal.ports.llm import Message
@@ -40,6 +41,7 @@ async def health() -> dict[str, str]:
 async def ask(
     req: AskRequest,
     assistant: HelperAgent = Depends(get_assistant),
+    _session=Depends(validate_session),
 ) -> AskResponse:
     start = time.monotonic()
     history_len = len(req.history)
