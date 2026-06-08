@@ -1,12 +1,17 @@
 """
 HTTP routes. Thin layer — translate HTTP <-> domain, nothing more.
 """
+import logging
+import time
+
 from fastapi import APIRouter, Depends
 from pydantic import BaseModel, Field
 
 from internal.api.dependencies import get_assistant
 from internal.core.helper_agent import Answer, HelperAgent, Question
 from internal.ports.llm import Message
+
+logger = logging.getLogger(__name__)
 
 
 class HistoryItem(BaseModel):
@@ -36,6 +41,20 @@ async def ask(
     req: AskRequest,
     assistant: HelperAgent = Depends(get_assistant),
 ) -> AskResponse:
-    history = tuple(Message(role=h.role, content=h.content) for h in req.history)
-    result: Answer = assistant.answer(Question(text=req.question), history=history)
-    return AskResponse(answer=result.text)
+    start = time.monotonic()
+    history_len = len(req.history)
+    logger.info("ask request: q_len=%d history=%d", len(req.question), history_len)
+
+    try:
+        history = tuple(Message(role=h.role, content=h.content) for h in req.history)
+        result: Answer = assistant.answer(Question(text=req.question), history=history)
+        elapsed_ms = (time.monotonic() - start) * 1000
+        logger.info(
+            "ask response: answer_len=%d elapsed_ms=%.0f",
+            len(result.text), elapsed_ms,
+        )
+        return AskResponse(answer=result.text)
+    except Exception:
+        elapsed_ms = (time.monotonic() - start) * 1000
+        logger.exception("ask failed after %.0fms", elapsed_ms)
+        raise
