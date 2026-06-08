@@ -1,8 +1,10 @@
 """
 Postgres-backed prompt repository adapter.
 
-Reads the configured pizza system prompt from the `prompt_helpers` table.
-The table already exists in the live DB with one row.
+Reads the configured system prompt for the helper service from the
+`system_prompts.helper_prompt` column — a singleton row where each
+column is a different service's system prompt (extensible at the DB
+level by adding new columns).
 """
 import os
 from typing import Optional
@@ -31,16 +33,15 @@ class PostgresPromptRepository(PromptRepository):
             with conn.cursor() as cur:
                 cur.execute(
                     """
-                    SELECT content, category
-                    FROM prompt_helpers
-                    WHERE title = 'system-prompt'
+                    SELECT helper_prompt
+                    FROM system_prompts
+                    WHERE id = 1
                     LIMIT 1
                     """
                 )
                 row = cur.fetchone()
 
         if row is None:
-            # Should not happen — the DB row is seeded by the remote commit migration
             return SystemPrompt(
                 text=(
                     "You are a strict pizza-only assistant. "
@@ -53,6 +54,6 @@ class PostgresPromptRepository(PromptRepository):
             )
 
         return SystemPrompt(
-            text=row["content"],
-            enforces_pizza_only=(row["category"] == "system"),
+            text=row["helper_prompt"],
+            enforces_pizza_only=True,
         )
