@@ -17,6 +17,8 @@ from internal.api.routes import router
 logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)
 
+# Global reference to keep gRPC server alive
+_grpc_server = None
 
 def create_app() -> FastAPI:
     app = FastAPI(title="Helper — AI Assistant (hexagonal)")
@@ -24,8 +26,10 @@ def create_app() -> FastAPI:
 
     @app.on_event("startup")
     async def start_grpc():
+        global _grpc_server
         assistant = get_assistant()
-        serve_grpc(assistant)
+        _grpc_server = serve_grpc(assistant)
+        logger.info("gRPC server started and referenced")
 
     return app
 
