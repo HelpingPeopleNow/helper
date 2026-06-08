@@ -1,0 +1,23 @@
+syntax = "proto3";
+
+package helper;
+
+option go_package = "github.com/HelpingPeopleNow/backend/proto/helper";
+
+service HelperService {
+  rpc Ask(AskRequest) returns (AskResponse);
+}
+
+message Message {
+  string role = 1;
+  string content = 2;
+}
+
+message AskRequest {
+  string question = 1;
+  repeated Message history = 2;
+}
+
+message AskResponse {
+  string answer = 1;
+}
