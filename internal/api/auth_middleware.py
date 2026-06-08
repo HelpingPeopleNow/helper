@@ -13,7 +13,7 @@ from httpx import AsyncClient
 
 logger = logging.getLogger(__name__)
 
-AUTH_SESSION_URL = "http://auth:8083/api/auth/session"
+AUTH_SESSION_URL = 'http://auth:8083/api/auth/get-session'
 
 _session_client: AsyncClient | None = None
 
