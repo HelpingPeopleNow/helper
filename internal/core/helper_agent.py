@@ -6,7 +6,7 @@ Depends only on the port protocols (interfaces), not on adapters.
 """
 from dataclasses import dataclass
 
-from internal.ports.llm import LLMPort
+from internal.ports.llm import LLMPort, Message
 from internal.ports.prompt_repository import PromptRepository
 
 
@@ -40,7 +40,11 @@ class HelperAgent:
         self._llm = llm
         self._prompts = prompts
 
-    def answer(self, question: Question) -> Answer:
+    def answer(self, question: Question, history: tuple[Message, ...] = ()) -> Answer:
         system_prompt = self._prompts.get_system_prompt()
-        text = self._llm.complete(system_prompt=system_prompt.text, user=question.text)
+        text = self._llm.complete(
+            system_prompt=system_prompt.text,
+            user=question.text,
+            history=history,
+        )
         return Answer(text=text)

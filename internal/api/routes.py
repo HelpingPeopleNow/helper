@@ -6,10 +6,17 @@ from pydantic import BaseModel, Field
 
 from internal.api.dependencies import get_assistant
 from internal.core.helper_agent import Answer, HelperAgent, Question
+from internal.ports.llm import Message
+
+
+class HistoryItem(BaseModel):
+    role: str = Field(..., pattern="^(user|assistant)$")
+    content: str
 
 
 class AskRequest(BaseModel):
     question: str = Field(..., min_length=1, description="User's question")
+    history: list[HistoryItem] = Field(default_factory=list, description="Previous conversation messages")
 
 
 class AskResponse(BaseModel):
@@ -29,5 +36,6 @@ async def ask(
     req: AskRequest,
     assistant: HelperAgent = Depends(get_assistant),
 ) -> AskResponse:
-    result: Answer = assistant.answer(Question(text=req.question))
+    history = tuple(Message(role=h.role, content=h.content) for h in req.history)
+    result: Answer = assistant.answer(Question(text=req.question), history=history)
     return AskResponse(answer=result.text)

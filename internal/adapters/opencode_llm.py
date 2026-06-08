@@ -6,9 +6,10 @@ OpenAI-compatible /chat/completions endpoint. Env-driven config.
 """
 import os
 
+from langchain_core.messages import AIMessage, HumanMessage, SystemMessage
 from langchain_openai import ChatOpenAI
 
-from internal.ports.llm import LLMPort
+from internal.ports.llm import LLMPort, Message
 
 
 class OpenCodeLLMAdapter:
@@ -26,6 +27,18 @@ class OpenCodeLLMAdapter:
             temperature=temperature,
         )
 
-    def complete(self, system_prompt: str, user: str) -> str:
-        response = self._llm.invoke([("system", system_prompt), ("user", user)])
+    def complete(self, system_prompt: str, user: str, history: tuple[Message, ...] = ()) -> str:
+        messages = [SystemMessage(content=system_prompt)]
+
+        # Add conversation history
+        for msg in history:
+            if msg.role == "user":
+                messages.append(HumanMessage(content=msg.content))
+            elif msg.role == "assistant":
+                messages.append(AIMessage(content=msg.content))
+
+        # Add current question
+        messages.append(HumanMessage(content=user))
+
+        response = self._llm.invoke(messages)
         return response.content
