@@ -5,7 +5,7 @@ from fastapi import APIRouter, Depends
 from pydantic import BaseModel, Field
 
 from internal.api.dependencies import get_assistant
-from internal.core.pizza_assistant import Answer, PizzaAssistant, Question
+from internal.core.helper_agent import Answer, HelperAgent, Question
 
 
 class AskRequest(BaseModel):
@@ -27,7 +27,7 @@ async def health() -> dict[str, str]:
 @router.post("/api/v1/ask", response_model=AskResponse)
 async def ask(
     req: AskRequest,
-    assistant: PizzaAssistant = Depends(get_assistant),
+    assistant: HelperAgent = Depends(get_assistant),
 ) -> AskResponse:
     result: Answer = assistant.answer(Question(text=req.question))
     return AskResponse(answer=result.text)

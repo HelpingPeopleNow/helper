@@ -28,7 +28,7 @@ class PostgresPromptRepository(PromptRepository):
         dbname = os.getenv("DB_NAME", "helpingpeoplenow")
         return f"host={host} port={port} user={user} password={password} dbname={dbname}"
 
-    def get_pizza_system_prompt(self) -> SystemPrompt:
+    def get_system_prompt(self) -> SystemPrompt:
         with psycopg.connect(self._dsn, row_factory=dict_row) as conn:
             with conn.cursor() as cur:
                 cur.execute(
@@ -43,17 +43,9 @@ class PostgresPromptRepository(PromptRepository):
 
         if row is None:
             return SystemPrompt(
-                text=(
-                    "You are a strict pizza-only assistant. "
-                    "You ONLY answer questions that are about pizza — its ingredients, "
-                    "history, recipes, cultural variations, preparation techniques, or anything "
-                    "pizza-adjacent. If the question is NOT about pizza, politely refuse to answer "
-                    "and explain that you can only discuss pizza."
-                ),
-                enforces_pizza_only=True,
+                text="You are a helpful assistant. Answer the user's question concisely and accurately.",
             )
 
         return SystemPrompt(
             text=row["helper_prompt"],
-            enforces_pizza_only=True,
         )

@@ -8,7 +8,7 @@ from functools import lru_cache
 from internal.adapters.langgraph_runner import LangGraphRunner
 from internal.adapters.opencode_llm import OpenCodeLLMAdapter
 from internal.adapters.postgres_repo import PostgresPromptRepository
-from internal.core.pizza_assistant import PizzaAssistant
+from internal.core.helper_agent import HelperAgent
 from internal.ports.graph import GraphRunner
 from internal.ports.llm import LLMPort
 from internal.ports.prompt_repository import PromptRepository
@@ -25,8 +25,8 @@ def _build_prompts() -> PromptRepository:
 
 
 @lru_cache
-def _build_assistant() -> PizzaAssistant:
-    return PizzaAssistant(llm=_build_llm(), prompts=_build_prompts())
+def _build_assistant() -> HelperAgent:
+    return HelperAgent(llm=_build_llm(), prompts=_build_prompts())
 
 
 @lru_cache
@@ -35,7 +35,7 @@ def _build_graph() -> GraphRunner:
 
 
 # Exposed for FastAPI Depends()
-def get_assistant() -> PizzaAssistant:
+def get_assistant() -> HelperAgent:
     return _build_assistant()
 
 

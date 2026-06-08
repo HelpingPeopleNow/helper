@@ -10,13 +10,12 @@ from typing import Protocol
 
 @dataclass(frozen=True)
 class SystemPrompt:
-    """A system prompt with metadata about the policy it enforces."""
+    """A system prompt read from storage."""
     text: str
-    enforces_pizza_only: bool
 
 
 class PromptRepository(Protocol):
-    """Anything that can return the configured pizza system prompt."""
+    """Anything that can return the configured system prompt."""
 
-    def get_pizza_system_prompt(self) -> SystemPrompt:
+    def get_system_prompt(self) -> SystemPrompt:
         ...

@@ -1,11 +1,10 @@
 """
-Domain core: the PizzaAssistant aggregate.
+Domain core: the HelperAgent aggregate.
 
 Pure business logic. No framework, no I/O, no LLM, no DB.
 Depends only on the port protocols (interfaces), not on adapters.
 """
 from dataclasses import dataclass
-from typing import Protocol
 
 from internal.ports.llm import LLMPort
 from internal.ports.prompt_repository import PromptRepository
@@ -27,13 +26,10 @@ class Answer:
     text: str
 
 
-class PizzaOnlyViolation(Exception):
-    """Raised when a prompt template does not enforce the pizza-only policy."""
-
-
-class PizzaAssistant:
+class HelperAgent:
     """
-    Domain service: orchestrates answering a question about pizza.
+    Domain service: orchestrates answering a question using an LLM
+    with the configured system prompt.
 
     Uses injected ports (LLM + prompt repository). The domain itself
     doesn't know whether the LLM is OpenAI, OpenCode, or a mock — that's
@@ -45,10 +41,6 @@ class PizzaAssistant:
         self._prompts = prompts
 
     def answer(self, question: Question) -> Answer:
-        system_prompt = self._prompts.get_pizza_system_prompt()
-        if not system_prompt.enforces_pizza_only:
-            raise PizzaOnlyViolation(
-                "Configured system prompt must enforce the pizza-only policy"
-            )
+        system_prompt = self._prompts.get_system_prompt()
         text = self._llm.complete(system_prompt=system_prompt.text, user=question.text)
         return Answer(text=text)
