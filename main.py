@@ -7,7 +7,7 @@ per-request via the llm_provider gRPC field. Empty = fall back to env default.
 import logging
 import os
 
-from internal.adapters.grpc_server import serve_grpc
+from internal.adapters.grpc_server import serve_grpc, serve_health
 from internal.adapters.opencode_llm import OpenCodeLLMAdapter
 from internal.adapters.ollama_llm import OllamaLLMAdapter
 from internal.core.helper_agent import HelperAgent
@@ -42,6 +42,11 @@ def main():
     logger.info("Starting gRPC server on port %d", grpc_port)
     server = serve_grpc(assistant, port=grpc_port)
     logger.info("=== Helper Service Ready ===")
+
+    # Start lightweight health HTTP endpoint
+    health_port = int(os.getenv("HEALTH_PORT", "8084"))
+    serve_health(port=health_port)
+    logger.info("Health HTTP server on :%d", health_port)
 
     server.wait_for_termination()
 

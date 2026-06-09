@@ -3,7 +3,11 @@ gRPC server adapter for the helper service.
 
 Runs alongside FastAPI on a separate port (50051).
 """
+import http.server
+import json
 import logging
+import os
+import threading
 import time
 from concurrent import futures
 
@@ -63,4 +67,29 @@ def serve_grpc(assistant: HelperAgent, port: int = 50051) -> grpc.Server:
     logger.info("gRPC server bound on :%d (port_result=%d)", port, bound)
     server.start()
     logger.info("gRPC server listening on :%d", port)
+    return server
+
+
+class HealthHandler(http.server.BaseHTTPRequestHandler):
+    """Minimal health check endpoint on a separate HTTP port."""
+    def do_GET(self) -> None:
+        if self.path == "/health":
+            self.send_response(200)
+            self.send_header("Content-Type", "application/json")
+            self.end_headers()
+            self.wfile.write(json.dumps({"status": "ok"}).encode())
+        else:
+            self.send_response(404)
+            self.end_headers()
+
+    def log_message(self, fmt, *args) -> None:
+        logger.debug("health: %s", fmt % args)
+
+
+def serve_health(port: int = 8084) -> http.server.HTTPServer:
+    """Start a lightweight health HTTP server in a daemon thread."""
+    server = http.server.HTTPServer(("0.0.0.0", port), HealthHandler)
+    thread = threading.Thread(target=server.serve_forever, daemon=True)
+    thread.start()
+    logger.info("health HTTP server on :%d", port)
     return server

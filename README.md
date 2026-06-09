@@ -2,7 +2,7 @@
 
 Stateless Python gRPC server that processes chat requests using LLM adapters. Receives questions from the backend via gRPC, picks the right LLM adapter (OpenCode or Ollama) per request, and returns answers with optional user role detection.
 
-**Container:** `helpingpeoplenow-helper` | **gRPC Port:** `:50051` (no HTTP)
+**Container:** `helpingpeoplenow-helper` | **gRPC Port:** `:50051` | **Health HTTP Port:** `:8084`
 
 ---
 
@@ -67,7 +67,7 @@ Stateless Python gRPC server that processes chat requests using LLM adapters. Re
 
 ### Key Design Decisions
 
-- **Stateless** — no database connection, no HTTP server, no file storage. Everything it needs comes via gRPC from the backend
+- **Stateless** — no database connection, no file storage. Everything it needs comes via gRPC from the backend. A lightweight health HTTP endpoint is available for liveness checks.
 - **Port-based** — `LLMPort` is a Python `Protocol` class; both adapters implement it. Adding a new provider (e.g., Anthropic, Groq) requires only a new adapter class
 - **Runtime provider switching** — the backend chooses the adapter per request. The helper never restarts when the provider changes
 
@@ -133,6 +133,16 @@ message AskResponse {
 ```
 
 Proto definition: `proto/helper.proto` (shared with the backend repo)
+
+### Health Check
+
+A lightweight HTTP health check server runs alongside the gRPC service, using Python stdlib `http.server` (no extra dependencies).
+
+| Endpoint | Method | Response |
+|----------|--------|----------|
+| `/health` | GET | `{"status":"ok"}` (200) |
+
+Port is configurable via the `HEALTH_PORT` env var (default: `8084`).
 
 ---
 
@@ -205,6 +215,7 @@ Format:
 | Variable | Default | Description |
 |----------|---------|-------------|
 | `GRPC_PORT` | `50051` | gRPC listen port |
+| `HEALTH_PORT` | `8084` | Health check HTTP listen port |
 | `LLM_BASE_URL` | `https://opencode.ai/zen/v1` | OpenCode API base URL |
 | `LLM_MODEL` | `deepseek-v4-flash-free` | OpenCode model name |
 | `LLM_API_KEY` | (required) | OpenCode API key |
