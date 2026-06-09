@@ -1,18 +1,16 @@
 """
-Application entry point. Composition root for the FastAPI app.
+Application entry point — starts only the gRPC server.
 
-Wires the API router to the dependency container and starts uvicorn
-alongside a gRPC server on :50051.
+Loads all LLM adapters at startup. The backend selects which one to use
+per-request via the llm_provider gRPC field. Empty = fall back to env default.
 """
 import logging
 import os
 
-import uvicorn
-from fastapi import FastAPI
-
 from internal.adapters.grpc_server import serve_grpc
-from internal.api.dependencies import get_assistant, get_graph
-from internal.api.routes import router
+from internal.adapters.opencode_llm import OpenCodeLLMAdapter
+from internal.adapters.ollama_llm import OllamaLLMAdapter
+from internal.core.helper_agent import HelperAgent
 
 logging.basicConfig(
     level=logging.INFO,
@@ -20,30 +18,33 @@ logging.basicConfig(
 )
 logger = logging.getLogger(__name__)
 
-# Global reference to keep gRPC server alive
-_grpc_server = None
 
+def main():
+    logger.info("=== Helper Service Starting ===")
+    logger.info("LLM model=%s", os.getenv("LLM_MODEL", "deepseek-v4-flash-free"))
 
-def create_app() -> FastAPI:
-    app = FastAPI(title="Helper — AI Assistant (hexagonal)")
+    # Load ALL adapters so the backend can switch per-request
+    adapters = {
+        "opencode": OpenCodeLLMAdapter(),
+        "ollama": OllamaLLMAdapter(),
+    }
+    logger.info("Loaded adapters: %s", list(adapters.keys()))
 
-    logger.info("registering routes")
-    app.include_router(router)
+    # Determine env-based default
+    use_ollama = os.getenv("USE_OLLAMA", "false").lower() in ("true", "1", "yes")
+    default_provider = "ollama" if use_ollama else "opencode"
+    logger.info("Default provider (from env USE_OLLAMA): %s", default_provider)
 
-    @app.on_event("startup")
-    async def start_grpc():
-        global _grpc_server
-        logger.info("initializing assistant and gRPC server")
-        assistant = get_assistant()
-        _grpc_server = serve_grpc(assistant)
-        logger.info("gRPC server started and referenced")
+    assistant = HelperAgent(adapters=adapters, default_provider=default_provider)
+    logger.info("HelperAgent initialized (no DB dependency, multi-adapter)")
 
-    return app
+    grpc_port = int(os.getenv("GRPC_PORT", "50051"))
+    logger.info("Starting gRPC server on port %d", grpc_port)
+    server = serve_grpc(assistant, port=grpc_port)
+    logger.info("=== Helper Service Ready ===")
 
+    server.wait_for_termination()
 
-app = create_app()
 
 if __name__ == "__main__":
-    port = int(os.getenv("PORT", "8082"))
-    logger.info("starting HTTP server on port %d", port)
-    uvicorn.run("main:app", host="0.0.0.0", port=port, log_level="info")
+    main()

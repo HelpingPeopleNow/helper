@@ -16,8 +16,11 @@ message Message {
 message AskRequest {
   string question = 1;
   repeated Message history = 2;
+  string system_prompt = 3;  // loaded by backend, provided on every call
+  string llm_provider = 4;   // "ollama" | "opencode" | "" (= use env default, set by admin)
 }
 
 message AskResponse {
   string answer = 1;
+  string detected_role = 2;  // "worker" | "client" | ""
 }

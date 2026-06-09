@@ -3,7 +3,7 @@
 import grpc
 import warnings
 
-from proto import helper_pb2 as proto_dot_helper__pb2
+from proto import helper_pb2 as helper__pb2
 
 GRPC_GENERATED_VERSION = '1.81.0'
 GRPC_VERSION = grpc.__version__
@@ -18,7 +18,7 @@ except ImportError:
 if _version_not_supported:
     raise RuntimeError(
         f'The grpc package installed is at version {GRPC_VERSION},'
-        + ' but the generated code in proto/helper_pb2_grpc.py depends on'
+        + ' but the generated code in helper_pb2_grpc.py depends on'
         + f' grpcio>={GRPC_GENERATED_VERSION}.'
         + f' Please upgrade your grpc module to grpcio>={GRPC_GENERATED_VERSION}'
         + f' or downgrade your generated code using grpcio-tools<={GRPC_VERSION}.'
@@ -36,8 +36,8 @@ class HelperServiceStub:
         """
         self.Ask = channel.unary_unary(
                 '/helper.HelperService/Ask',
-                request_serializer=proto_dot_helper__pb2.AskRequest.SerializeToString,
-                response_deserializer=proto_dot_helper__pb2.AskResponse.FromString,
+                request_serializer=helper__pb2.AskRequest.SerializeToString,
+                response_deserializer=helper__pb2.AskResponse.FromString,
                 _registered_method=True)
 
 
@@ -55,8 +55,8 @@ def add_HelperServiceServicer_to_server(servicer, server):
     rpc_method_handlers = {
             'Ask': grpc.unary_unary_rpc_method_handler(
                     servicer.Ask,
-                    request_deserializer=proto_dot_helper__pb2.AskRequest.FromString,
-                    response_serializer=proto_dot_helper__pb2.AskResponse.SerializeToString,
+                    request_deserializer=helper__pb2.AskRequest.FromString,
+                    response_serializer=helper__pb2.AskResponse.SerializeToString,
             ),
     }
     generic_handler = grpc.method_handlers_generic_handler(
@@ -84,8 +84,8 @@ class HelperService:
             request,
             target,
             '/helper.HelperService/Ask',
-            proto_dot_helper__pb2.AskRequest.SerializeToString,
-            proto_dot_helper__pb2.AskResponse.FromString,
+            helper__pb2.AskRequest.SerializeToString,
+            helper__pb2.AskResponse.FromString,
             options,
             channel_credentials,
             insecure,

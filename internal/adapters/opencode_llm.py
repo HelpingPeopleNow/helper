@@ -38,6 +38,7 @@ class OpenCodeLLMAdapter:
         )
 
     def complete(self, system_prompt: str, user: str, history: tuple[Message, ...] = ()) -> str:
+        # Accept tuple in signature, convert to list for requests
         messages = [SystemMessage(content=system_prompt)]
 
         for msg in history:

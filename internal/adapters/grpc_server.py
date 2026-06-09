@@ -26,7 +26,12 @@ class HelperServicer(helper_pb2_grpc.HelperServiceServicer):
     def Ask(self, request: helper_pb2.AskRequest, context: ServicerContext) -> helper_pb2.AskResponse:
         start = time.monotonic()
         history_len = len(request.history)
-        logger.info("gRPC Ask: q_len=%d history=%d", len(request.question), history_len)
+        system_prompt = request.system_prompt  # received from backend
+        llm_provider = request.llm_provider  # "ollama" | "opencode" | ""
+        logger.info("gRPC Ask: q_len=%d history=%d sp_len=%d provider=%s",
+                     len(request.question), history_len, len(system_prompt), llm_provider or "(env default)")
+        if logger.isEnabledFor(logging.DEBUG) and system_prompt:
+            logger.debug("gRPC system_prompt[:150]: %s", system_prompt[:150])
 
         try:
             history = tuple(
@@ -35,11 +40,13 @@ class HelperServicer(helper_pb2_grpc.HelperServiceServicer):
             )
             result: Answer = self._assistant.answer(
                 Question(text=request.question),
+                system_prompt=system_prompt,  # passed through from backend
                 history=history,
+                llm_provider=llm_provider,  # "ollama" | "opencode" | "" (falls back to env default)
             )
             elapsed_ms = (time.monotonic() - start) * 1000
-            logger.info("gRPC Ask done: answer_len=%d elapsed_ms=%.0f", len(result.text), elapsed_ms)
-            return helper_pb2.AskResponse(answer=result.text)
+            logger.info("gRPC Ask done: answer_len=%d role=%s elapsed_ms=%.0f", len(result.text), result.detected_role or "none", elapsed_ms)
+            return helper_pb2.AskResponse(answer=result.text, detected_role=result.detected_role)
         except Exception:
             elapsed_ms = (time.monotonic() - start) * 1000
             logger.exception("gRPC Ask failed after %.0fms", elapsed_ms)
