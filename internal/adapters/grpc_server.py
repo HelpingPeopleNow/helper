@@ -32,8 +32,9 @@ class HelperServicer(helper_pb2_grpc.HelperServiceServicer):
         history_len = len(request.history)
         system_prompt = request.system_prompt  # received from backend
         llm_provider = request.llm_provider  # "ollama" | "opencode" | ""
-        logger.info("gRPC Ask: q_len=%d history=%d sp_len=%d provider=%s",
-                     len(request.question), history_len, len(system_prompt), llm_provider or "(env default)")
+        skip_role_detection = request.skip_role_detection
+        logger.info("gRPC Ask: q_len=%d history=%d sp_len=%d provider=%s skip_role=%s",
+                     len(request.question), history_len, len(system_prompt), llm_provider or "(env default)", skip_role_detection)
         if logger.isEnabledFor(logging.DEBUG) and system_prompt:
             logger.debug("gRPC system_prompt[:150]: %s", system_prompt[:150])
 
@@ -47,6 +48,7 @@ class HelperServicer(helper_pb2_grpc.HelperServiceServicer):
                 system_prompt=system_prompt,  # passed through from backend
                 history=history,
                 llm_provider=llm_provider,  # "ollama" | "opencode" | "" (falls back to env default)
+                skip_role_detection=skip_role_detection,
             )
             elapsed_ms = (time.monotonic() - start) * 1000
             logger.info("gRPC Ask done: answer_len=%d role=%s elapsed_ms=%.0f", len(result.text), result.detected_role or "none", elapsed_ms)

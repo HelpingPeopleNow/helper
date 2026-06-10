@@ -27,9 +27,12 @@ def main():
     adapters = {
         "opencode1": OpenCodeLLMAdapter(model="deepseek-v4-flash-free"),
         "opencode2": OpenCodeLLMAdapter(model="mimo-v2.5-free"),
-        "mistral": MistralLLMAdapter(model="mistral-large-latest"),
         "ollama": OllamaLLMAdapter(),
     }
+    if os.getenv("MISTRAL_API_KEY", "").strip():
+        adapters["mistral"] = MistralLLMAdapter(model="mistral-large-latest")
+    else:
+        logger.warning("MISTRAL_API_KEY not set; skipping Mistral adapter")
     logger.info("Loaded adapters: %s", list(adapters.keys()))
 
     assistant = HelperAgent(adapters=adapters)

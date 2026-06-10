@@ -24,7 +24,7 @@ _sym_db = _symbol_database.Default()
 
 
 
-DESCRIPTOR = _descriptor_pool.Default().AddSerializedFile(b'\n\x0chelper.proto\x12\x06helper\"(\n\x07Message\x12\x0c\n\x04role\x18\x01 \x01(\t\x12\x0f\n\x07\x63ontent\x18\x02 \x01(\t\"m\n\nAskRequest\x12\x10\n\x08question\x18\x01 \x01(\t\x12 \n\x07history\x18\x02 \x03(\x0b\x32\x0f.helper.Message\x12\x15\n\rsystem_prompt\x18\x03 \x01(\t\x12\x14\n\x0cllm_provider\x18\x04 \x01(\t\"4\n\x0b\x41skResponse\x12\x0e\n\x06\x61nswer\x18\x01 \x01(\t\x12\x15\n\rdetected_role\x18\x02 \x01(\t2?\n\rHelperService\x12.\n\x03\x41sk\x12\x12.helper.AskRequest\x1a\x13.helper.AskResponseB2Z0github.com/HelpingPeopleNow/backend/proto/helperb\x06proto3')
+DESCRIPTOR = _descriptor_pool.Default().AddSerializedFile(b'\n\x0chelper.proto\x12\x06helper\"(\n\x07Message\x12\x0c\n\x04role\x18\x01 \x01(\t\x12\x0f\n\x07\x63ontent\x18\x02 \x01(\t\"\x8a\x01\n\nAskRequest\x12\x10\n\x08question\x18\x01 \x01(\t\x12 \n\x07history\x18\x02 \x03(\x0b\x32\x0f.helper.Message\x12\x15\n\rsystem_prompt\x18\x03 \x01(\t\x12\x14\n\x0cllm_provider\x18\x04 \x01(\t\x12\x1b\n\x13skip_role_detection\x18\x05 \x01(\x08\"4\n\x0b\x41skResponse\x12\x0e\n\x06\x61nswer\x18\x01 \x01(\t\x12\x15\n\rdetected_role\x18\x02 \x01(\t2?\n\rHelperService\x12.\n\x03\x41sk\x12\x12.helper.AskRequest\x1a\x13.helper.AskResponseB2Z0github.com/HelpingPeopleNow/backend/proto/helperb\x06proto3')
 
 _globals = globals()
 _builder.BuildMessageAndEnumDescriptors(DESCRIPTOR, _globals)
@@ -34,10 +34,10 @@ if not _descriptor._USE_C_DESCRIPTORS:
   _globals['DESCRIPTOR']._serialized_options = b'Z0github.com/HelpingPeopleNow/backend/proto/helper'
   _globals['_MESSAGE']._serialized_start=24
   _globals['_MESSAGE']._serialized_end=64
-  _globals['_ASKREQUEST']._serialized_start=66
-  _globals['_ASKREQUEST']._serialized_end=175
-  _globals['_ASKRESPONSE']._serialized_start=177
-  _globals['_ASKRESPONSE']._serialized_end=229
-  _globals['_HELPERSERVICE']._serialized_start=231
-  _globals['_HELPERSERVICE']._serialized_end=294
+  _globals['_ASKREQUEST']._serialized_start=67
+  _globals['_ASKREQUEST']._serialized_end=205
+  _globals['_ASKRESPONSE']._serialized_start=207
+  _globals['_ASKRESPONSE']._serialized_end=259
+  _globals['_HELPERSERVICE']._serialized_start=261
+  _globals['_HELPERSERVICE']._serialized_end=324
 # @@protoc_insertion_point(module_scope)

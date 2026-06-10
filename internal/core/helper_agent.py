@@ -57,7 +57,7 @@ class HelperAgent:
         self._adapters = adapters
         logger.info("HelperAgent: %d adapters loaded", len(adapters))
 
-    def answer(self, question: Question, system_prompt: str, history: tuple[Message, ...] = (), llm_provider: str = "") -> Answer:
+    def answer(self, question: Question, system_prompt: str, history: tuple[Message, ...] = (), llm_provider: str = "", skip_role_detection: bool = False) -> Answer:
         # Build provider chain
         if llm_provider:
             # Admin-set provider: try it first, then fall through the chain
@@ -66,12 +66,15 @@ class HelperAgent:
             # Auto mode: use default fallback chain
             providers_chain = self.FALLBACK_CHAIN
 
-        user_text = question.text + (
-            "\n\nIMPORTANT — You MUST respond with valid JSON ONLY in this exact format: "
-            '{"answer": "your response here", "role": "worker"}'
-            ' Choose role="worker" if they offer services, role="client" if they need help, '
-            'or role="" if unclear. Use double quotes only.'
-        )
+        if skip_role_detection:
+            user_text = question.text
+        else:
+            user_text = question.text + (
+                "\n\nIMPORTANT — You MUST respond with valid JSON ONLY in this exact format: "
+                '{"answer": "your response here", "role": "worker"}'
+                ' Choose role="worker" if they offer services, role="client" if they need help, '
+                'or role="" if unclear. Use double quotes only.'
+            )
 
         last_error = None
         for i, provider in enumerate(providers_chain):

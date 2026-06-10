@@ -18,6 +18,7 @@ message AskRequest {
   repeated Message history = 2;
   string system_prompt = 3;  // loaded by backend, provided on every call
   string llm_provider = 4;   // "ollama" | "opencode" | "" (= use env default, set by admin)
+  bool skip_role_detection = 5;  // if true, don't append JSON role-detection instructions
 }
 
 message AskResponse {
