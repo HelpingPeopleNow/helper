@@ -18,7 +18,7 @@ class OllamaLLMAdapter:
         model: str | None = None,
         base_url: str | None = None,
     ) -> None:
-        self._model = model or os.getenv("OLLAMA_MODEL", "qwen3:1.7b")
+        self._model = model or os.getenv("OLLAMA_MODEL", "qwen3.5:0.8b")
         self._base_url = (base_url or os.getenv("OLLAMA_BASE_URL", "")).rstrip("/")
         logger.info("Ollama init: model=%s base_url=%s", self._model, self._base_url)
 
@@ -39,7 +39,7 @@ class OllamaLLMAdapter:
 
         logger.info("Ollama call: model=%s prompt_chars=%d", self._model, len(full_prompt))
 
-        resp = requests.post(url, json=payload, timeout=120)
+        resp = requests.post(url, json=payload, stream=False, timeout=60)
         resp.raise_for_status()
         data = resp.json()
 

@@ -8,7 +8,6 @@ The system prompt is received from the backend via gRPC.
 import json
 import logging
 from dataclasses import dataclass
-from typing import Optional
 
 from internal.ports.llm import LLMPort, Message
 
@@ -48,58 +47,69 @@ class HelperAgent:
     with the provided system prompt.
 
     Holds multiple LLM adapters; the backend selects which one to use
-    per-request via the llm_provider field. Empty = env default fallback.
+    per-request via the llm_provider field. Empty = auto fallback chain.
     """
 
-    def __init__(self, adapters: dict[str, LLMPort], default_provider: str = "opencode") -> None:
+    # Default fallback chain when no explicit provider is set
+    FALLBACK_CHAIN = ["mistral", "opencode1", "opencode2", "ollama"]
+
+    def __init__(self, adapters: dict[str, LLMPort]) -> None:
         self._adapters = adapters
-        self._default_provider = default_provider
-        logger.info("HelperAgent: %d adapters loaded, default=%s", len(adapters), default_provider)
+        logger.info("HelperAgent: %d adapters loaded", len(adapters))
 
     def answer(self, question: Question, system_prompt: str, history: tuple[Message, ...] = (), llm_provider: str = "") -> Answer:
-        # Pick adapter: explicit override or env default
-        provider = llm_provider or self._default_provider
-        llm = self._adapters.get(provider)
-        if llm is None:
-            logger.warning("Unknown llm_provider=%r, falling back to default=%s", llm_provider, self._default_provider)
-            provider = self._default_provider
-            llm = self._adapters[provider]
+        # Build provider chain
+        if llm_provider:
+            # Admin-set provider: try it first, then fall through the chain
+            providers_chain = [llm_provider] + [p for p in self.FALLBACK_CHAIN if p != llm_provider]
+        else:
+            # Auto mode: use default fallback chain
+            providers_chain = self.FALLBACK_CHAIN
 
-        logger.info("HelperAgent.answer: provider=%s (request=%r default=%s) sp_len=%d q_len=%d history=%d",
-                     provider, llm_provider, self._default_provider, len(system_prompt), len(question.text), len(history))
-        if logger.isEnabledFor(logging.DEBUG) and system_prompt:
-            logger.debug("system_prompt[:150]: %s", system_prompt[:150])
+        user_text = question.text + (
+            "\n\nIMPORTANT — You MUST respond with valid JSON ONLY in this exact format: "
+            '{"answer": "your response here", "role": "worker"}'
+            ' Choose role="worker" if they offer services, role="client" if they need help, '
+            'or role="" if unclear. Use double quotes only.'
+        )
 
-        raw = ""
-        try:
-            # Append format instruction to the user message directly — some
-            # providers are less reliable at following system prompt formatting.
-            user_text = question.text + (
-                "\n\nIMPORTANT — You MUST respond with valid JSON ONLY in this exact format: "
-                '{"answer": "your response here", "role": "worker|client|"}\n'
-                'Choose role="worker" if they offer services, role="client" if they need help, '
-                'or role="" if unclear. Use double quotes only.'
-            )
-            raw = llm.complete(
-                system_prompt=system_prompt,
-                user=user_text,
-                history=history,
-            )
-            return self._parse_response(raw)
-        except json.JSONDecodeError:
-            logger.warning("LLM returned invalid JSON, falling back to raw text", exc_info=True)
-            return Answer(text=raw)
-        except Exception:
-            logger.exception("LLM call failed")
-            raise
+        last_error = None
+        for i, provider in enumerate(providers_chain):
+            llm = self._adapters.get(provider)
+            if not llm:
+                logger.debug("No adapter for provider %r, skipping", provider)
+                continue
+
+            logger.info("Trying LLM provider=%s (attempt %d/%d) sp_len=%d q_len=%d history=%d",
+                        provider, i + 1, len(providers_chain),
+                        len(system_prompt), len(question.text), len(history))
+            try:
+                raw = llm.complete(
+                    system_prompt=system_prompt,
+                    user=user_text,
+                    history=history,
+                )
+                return self._parse_response(raw)
+            except Exception as e:
+                last_error = e
+                logger.warning("LLM provider %s failed: %s", provider, e)
+                continue
+
+        # All providers failed
+        logger.error("All LLM providers failed")
+        raise last_error or RuntimeError("No LLM providers available")
 
     def _parse_response(self, raw: str) -> Answer:
-        """Parse the LLM's JSON response into Answer + role."""
-        # Try to extract JSON from the response
+        """Parse the LLM's response into Answer + role.
+
+        First tries to extract JSON-wrapped response {"answer":..., "role":...}
+        (used by main chat for role detection).
+        If JSON parsing fails, returns the raw text with no detected role
+        (worker chat where [FIELDS] blocks are extracted by the backend).
+        """
         text = raw.strip()
         # Handle markdown-wrapped JSON
         if text.startswith("```"):
-            # Remove opening ```json / ``` and closing ```
             for prefix in ("```json", "```"):
                 if text.startswith(prefix):
                     text = text[len(prefix):]
@@ -108,16 +118,29 @@ class HelperAgent:
                 text = text[:-3]
             text = text.strip()
 
-        data = json.loads(text)
-        answer_text = data.get("answer", "")
-        role = data.get("role", "")
+        # Try to parse the {…} JSON (may be followed by extra text)
+        brace_start = text.find("{")
+        if brace_start >= 0:
+            depth = 0
+            for i in range(brace_start, len(text)):
+                if text[i] == "{":
+                    depth += 1
+                elif text[i] == "}":
+                    depth -= 1
+                    if depth == 0:
+                        json_part = text[brace_start:i + 1]
+                        try:
+                            data = json.loads(json_part)
+                            answer_text = data.get("answer", "")
+                            role = data.get("role", "")
+                            if answer_text:
+                                if role not in ("worker", "client", ""):
+                                    logger.warning("LLM returned unexpected role %r, ignoring", role)
+                                    role = ""
+                                return Answer(text=answer_text, detected_role=role)
+                        except json.JSONDecodeError:
+                            pass
+                        break  # outermost brace closed — stop looking
 
-        if not answer_text:
-            logger.warning("LLM response missing 'answer' field, using raw")
-            return Answer(text=raw)
-
-        if role not in ("worker", "client", ""):
-            logger.warning("LLM returned unexpected role %r, ignoring", role)
-            role = ""
-
-        return Answer(text=answer_text, detected_role=role)
+        # Non-JSON response — return raw text (worker chat, etc.)
+        return Answer(text=raw)
