@@ -108,27 +108,14 @@ def _check_ollama(base_url: str, model: str, timeout: int = 5) -> tuple[str, str
         return "down", str(exc)
 
 
-def _check_whisper_model() -> tuple[str, str]:
-    """Check if the whisper model configuration is valid (without loading the model)."""
-    model_name = os.getenv("WHISPER_MODEL", "tiny")
-    compute_type = os.getenv("WHISPER_COMPUTE_TYPE", "int8")
-    cpu_threads = os.getenv("WHISPER_CPU_THREADS", "2")
-    try:
-        int(cpu_threads)
-        return "ok", f"model={model_name}, compute={compute_type}, threads={cpu_threads}"
-    except ValueError:
-        return "down", f"invalid WHISPER_CPU_THREADS={cpu_threads}"
-
-
 class HealthHandler(http.server.BaseHTTPRequestHandler):
     """Health check endpoint with dependency checks.
 
-    Reports on: gRPC server, LLM adapters, transcribe service.
+    Reports on: gRPC server, LLM adapters.
     """
     # Set via configure_health_handler() before server starts
     _adapter_names: list[str] = []
     _grpc_server: Optional[grpc.Server] = None
-    _transcribe_port: int = 0
     _adapter_details: dict[str, dict[str, str]] = {}
 
     def do_GET(self) -> None:
@@ -139,7 +126,7 @@ class HealthHandler(http.server.BaseHTTPRequestHandler):
             self.end_headers()
 
     def _handle_health(self) -> None:
-        status = {"status": "ok", "grpc": "ok", "adapters": "ok", "transcribe": "ok"}
+        status = {"status": "ok", "grpc": "ok", "adapters": "ok"}
 
         # Check gRPC server — if this handler is serving, the process is alive.
         # The gRPC server object can tell us if it's been stopped.
@@ -181,17 +168,11 @@ class HealthHandler(http.server.BaseHTTPRequestHandler):
         status["adapter_details"] = adapter_details
         status["loaded_adapters"] = self._adapter_names
 
-        # Transcribe service — check model config
-        transcribe_status, transcribe_detail = _check_whisper_model()
-        status["transcribe"] = transcribe_status
-        status["transcribe_port"] = self._transcribe_port
-        status["transcribe_detail"] = transcribe_detail
-
         # Determine overall status:
-        # - 503 only if critical deps are down (grpc, no adapters, transcribe)
+        # - 503 only if critical deps are down (grpc, no adapters)
         # - 200 if service is usable but optional deps are degraded
         has_any_healthy_adapter = any(v == "ok" for v in adapter_results.values())
-        critical_ok = status["grpc"] == "ok" and has_any_healthy_adapter and transcribe_status == "ok"
+        critical_ok = status["grpc"] == "ok" and has_any_healthy_adapter
 
         if not critical_ok:
             status["status"] = "degraded"
@@ -221,12 +202,10 @@ def serve_grpc(assistant: HelperAgent, port: int = 50051) -> grpc.Server:
 
 
 def configure_health_handler(adapter_names: list[str], grpc_server: Optional[grpc.Server] = None,
-                              transcribe_port: int = 0,
                               adapter_details: Optional[dict[str, dict[str, str]]] = None) -> None:
     """Set health check dependencies before starting the server."""
     HealthHandler._adapter_names = adapter_names
     HealthHandler._grpc_server = grpc_server
-    HealthHandler._transcribe_port = transcribe_port
     HealthHandler._adapter_details = adapter_details or {}
 
 

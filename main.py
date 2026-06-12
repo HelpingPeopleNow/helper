@@ -1,4 +1,4 @@
-"""Application entry point — starts gRPC server + transcribe HTTP server.
+"""Application entry point — starts gRPC server.
 
 Loads all LLM adapters at startup. The backend selects which one to use
 per-request via the llm_provider gRPC field. Empty = default fallback chain:
@@ -8,7 +8,6 @@ import logging
 import os
 
 from internal.adapters.grpc_server import configure_health_handler, serve_grpc, serve_health
-from internal.adapters.transcribe_server import serve_transcribe
 from internal.adapters.mistral_llm import MistralLLMAdapter
 from internal.adapters.opencode_llm import OpenCodeLLMAdapter
 from internal.adapters.ollama_llm import OllamaLLMAdapter
@@ -71,16 +70,10 @@ def main():
     grpc_server = serve_grpc(assistant, port=grpc_port)
     logger.info("=== Helper Service Ready ===")
 
-    # Start transcription HTTP endpoint (whisper)
-    transcribe_port = int(os.getenv("TRANSCRIBE_PORT", "8085"))
-    serve_transcribe(port=transcribe_port)
-    logger.info("Transcribe HTTP server on :%d", transcribe_port)
-
     # Configure health handler with dependency info, then start it last
     configure_health_handler(
         adapter_names=list(adapters.keys()),
         grpc_server=grpc_server,
-        transcribe_port=transcribe_port,
         adapter_details=adapter_details,
     )
 
