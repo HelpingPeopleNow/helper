@@ -260,7 +260,6 @@ Format:
 | `MISTRAL_BASE_URL` | `https://api.mistral.ai/v1` | Mistral API base URL |
 | `OLLAMA_BASE_URL` | `http://localhost:11434` | Ollama endpoint (used when provider=ollama) |
 | `OLLAMA_MODEL` | `qwen3:1.7b` | Ollama model name |
-| `USE_OLLAMA` | `false` | Default provider: `"true"` or `"1"` → ollama, else opencode |
 
 ---
 

@@ -52,4 +52,3 @@ No `PYTHONPATH` needed when running from the project root.
 | `MISTRAL_BASE_URL` | `https://api.mistral.ai/v1` | Mistral API |
 | `OLLAMA_BASE_URL` | `http://localhost:11434` | Ollama endpoint |
 | `OLLAMA_MODEL` | `qwen3:1.7b` | Ollama model |
-| `USE_OLLAMA` | `false` | `"true"`/`"1"`/`"yes"` → default to ollama |
