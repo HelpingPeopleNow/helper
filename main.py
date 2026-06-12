@@ -29,8 +29,33 @@ def main():
         "opencode2": OpenCodeLLMAdapter(model="mimo-v2.5-free"),
         "ollama": OllamaLLMAdapter(),
     }
+    adapter_details = {
+        "opencode1": {
+            "kind": "openai_compat",
+            "base_url": os.getenv("LLM_BASE_URL", "https://opencode.ai/zen/v1"),
+            "api_key": os.getenv("LLM_API_KEY", ""),
+            "model": "deepseek-v4-flash-free",
+        },
+        "opencode2": {
+            "kind": "openai_compat",
+            "base_url": os.getenv("LLM_BASE_URL", "https://opencode.ai/zen/v1"),
+            "api_key": os.getenv("LLM_API_KEY", ""),
+            "model": "mimo-v2.5-free",
+        },
+        "ollama": {
+            "kind": "ollama",
+            "base_url": os.getenv("OLLAMA_BASE_URL", ""),
+            "model": os.getenv("OLLAMA_MODEL", "qwen3.5:0.8b"),
+        },
+    }
     if os.getenv("MISTRAL_API_KEY", "").strip():
         adapters["mistral"] = MistralLLMAdapter(model="mistral-large-latest")
+        adapter_details["mistral"] = {
+            "kind": "openai_compat",
+            "base_url": os.getenv("MISTRAL_BASE_URL", "https://api.mistral.ai/v1"),
+            "api_key": os.getenv("MISTRAL_API_KEY", ""),
+            "model": "mistral-large-latest",
+        }
     else:
         logger.warning("MISTRAL_API_KEY not set; skipping Mistral adapter")
     logger.info("Loaded adapters: %s", list(adapters.keys()))
@@ -56,6 +81,7 @@ def main():
         adapter_names=list(adapters.keys()),
         grpc_server=grpc_server,
         transcribe_port=transcribe_port,
+        adapter_details=adapter_details,
     )
 
     # Start lightweight health HTTP endpoint
