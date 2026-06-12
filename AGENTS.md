@@ -1,18 +1,20 @@
 # helper
 
-Stateless Python gRPC server that processes chat requests through LLM adapters. No HTTP, no database.
+Stateless Python gRPC server that processes chat requests through LLM adapters. No database.
 
 ## Key facts
 
 - **No tests, no lint, no typecheck** — only CI is Docker build/push (`docker.yml`). The only verification is that `python main.py` starts without error.
-- **OpenCode adapter uses `langchain_openai.ChatOpenAI`** (despite README claiming httpx). The `requirements.txt` has `langchain-openai` and `requests`.
-- **Ollama adapter uses raw `requests`**, no langchain — full prompt (system+history+user) is concatenated into a single string.
+- **OpenCode adapters use `langchain_openai.ChatOpenAI`** — both `opencode1` (deepseek-v4-flash-free) and `opencode2` (mimo-v2.5-free) go through the OpenAI-compatible API at `opencode.ai/zen/v1`.
+- **Mistral adapter uses `langchain_openai.ChatOpenAI`** — Mistral's API is OpenAI-compatible; requires `MISTRAL_API_KEY`.
+- **Ollama adapter uses raw `requests`** — no langchain; full prompt (system+history+user) is concatenated into a single string.
 - **JSON format instructions are appended to the user message**, not the system prompt — some providers ignore system formatting.
-- **No HTTP health endpoint** despite `HEALTH_PORT=8084` in docker-compose. There's no `/health` or any HTTP listener.
+- **Health HTTP endpoint** on `:8084` via stdlib `http.server` — serves `GET /health` → `{"status":"ok"}`.
+- **Fallback chain**: Mistral → OpenCode 1 → OpenCode 2 → Ollama (when no explicit provider is set).
 
 ## Architecture
 
-Pure hexagonal: `HelperAgent` (in `internal/core/helper_agent.py`) depends only on `LLMPort` Protocol (`internal/ports/llm.py`). Both adapters implement it. Adapters are loaded once at startup in `main.py`; the backend picks per-request via the `llm_provider` gRPC field.
+Pure hexagonal: `HelperAgent` (in `internal/core/helper_agent.py`) depends only on `LLMPort` Protocol (`internal/ports/llm.py`). All adapters implement it. Adapters are loaded once at startup in `main.py`; the backend picks per-request via the `llm_provider` gRPC field.
 
 ## Proto regeneration
 
@@ -31,7 +33,7 @@ If JSON parsing fails, `HelperAgent` falls back to raw text (role = `""`).
 
 ```bash
 pip install -r requirements.txt
-python main.py          # starts gRPC on :50051
+python main.py          # starts gRPC on :50051 + health on :8084
 ```
 
 No `PYTHONPATH` needed when running from the project root.
@@ -41,9 +43,13 @@ No `PYTHONPATH` needed when running from the project root.
 | Variable | Default | Notes |
 |----------|---------|-------|
 | `GRPC_PORT` | `50051` | gRPC listen port |
+| `HEALTH_PORT` | `8084` | Health check HTTP listen port |
 | `LLM_BASE_URL` | `https://opencode.ai/zen/v1` | OpenCode API |
 | `LLM_MODEL` | `deepseek-v4-flash-free` | OpenCode model |
 | `LLM_API_KEY` | — | Required for OpenCode |
+| `MISTRAL_API_KEY` | — | Optional; if not set, Mistral adapter is skipped |
+| `MISTRAL_MODEL` | `mistral-large-latest` | Mistral model |
+| `MISTRAL_BASE_URL` | `https://api.mistral.ai/v1` | Mistral API |
 | `OLLAMA_BASE_URL` | `http://localhost:11434` | Ollama endpoint |
 | `OLLAMA_MODEL` | `qwen3:1.7b` | Ollama model |
 | `USE_OLLAMA` | `false` | `"true"`/`"1"`/`"yes"` → default to ollama |
