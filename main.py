@@ -19,8 +19,22 @@ logging.basicConfig(
 )
 logger = logging.getLogger(__name__)
 
+def require_env(key: str) -> str:
+    v = os.getenv(key, "").strip()
+    if not v:
+        logger.error("FATAL: missing required environment variable: %s", key)
+        raise SystemExit(1)
+    return v
+
 def main():
     logger.info("=== Helper Service Starting ===")
+
+    # Validate required env vars before doing anything
+    require_env("LLM_API_KEY")
+    require_env("LLM_BASE_URL")
+    require_env("LLM_MODEL")
+    require_env("GRPC_PORT")
+    require_env("HEALTH_PORT")
 
     # Load ALL adapters so the backend can switch per-request
     adapters = {
