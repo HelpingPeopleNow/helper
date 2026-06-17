@@ -35,6 +35,7 @@ class OllamaLLMAdapter:
             "model": self._model,
             "prompt": full_prompt,
             "stream": False,
+            "think": False,
         }
 
         logger.info("Ollama call: model=%s prompt_chars=%d", self._model, len(full_prompt))
