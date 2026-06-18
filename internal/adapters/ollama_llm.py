@@ -40,9 +40,13 @@ class OllamaLLMAdapter:
 
         logger.info("Ollama call: model=%s prompt_chars=%d", self._model, len(full_prompt))
 
-        resp = requests.post(url, json=payload, stream=False, timeout=60)
-        resp.raise_for_status()
-        data = resp.json()
+        try:
+            resp = requests.post(url, json=payload, stream=False, timeout=60)
+            resp.raise_for_status()
+            data = resp.json()
+        except Exception:
+            logger.exception("Ollama adapter error url=%s model=%s", url, self._model)
+            raise
 
         result = data.get("response", "")
         logger.info("Ollama response: response_chars=%d", len(result))

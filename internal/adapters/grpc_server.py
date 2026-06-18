@@ -69,6 +69,7 @@ def _check_http_url(url: str, timeout: int = 3) -> tuple[str, str]:
         with urlopen(req, timeout=timeout) as resp:
             return "ok", f"HTTP {resp.status}"
     except Exception as exc:
+        logger.warning("health check http_url=%s error=%s", url, exc)
         return "down", str(exc)
 
 
@@ -87,6 +88,7 @@ def _check_openai_compat(base_url: str, api_key: str, model: str, timeout: int =
             return "ok", f"HTTP {resp.status_code}"
         return "down", f"HTTP {resp.status_code}: {resp.text[:100]}"
     except Exception as exc:
+        logger.warning("health check openai_compat url=%s error=%s", base_url, exc)
         return "down", str(exc)
 
 
@@ -105,6 +107,7 @@ def _check_ollama(base_url: str, model: str, timeout: int = 5) -> tuple[str, str
             return "ok", f"model {model} found"
         return "down", f"model {model} not found"
     except Exception as exc:
+        logger.warning("health check ollama url=%s error=%s", base_url, exc)
         return "down", str(exc)
 
 
@@ -122,6 +125,7 @@ class HealthHandler(http.server.BaseHTTPRequestHandler):
         if self.path == "/health":
             self._handle_health()
         else:
+            logger.warning("health unknown_path=%s", self.path)
             self.send_response(404)
             self.end_headers()
 

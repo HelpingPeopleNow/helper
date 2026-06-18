@@ -141,8 +141,8 @@ class HelperAgent:
                                     logger.warning("LLM returned unexpected role %r, ignoring", role)
                                     role = ""
                                 return Answer(text=answer_text, detected_role=role)
-                        except json.JSONDecodeError:
-                            pass
+                        except json.JSONDecodeError as e:
+                            logger.warning("LLM returned malformed JSON error=%s raw_text=%s", str(e), text[:200])
                         break  # outermost brace closed — stop looking
 
         # Non-JSON response — return raw text (worker chat, etc.)
