@@ -13,10 +13,22 @@ from concurrent import futures
 from typing import Callable, Optional
 from urllib.parse import urlparse
 from urllib.request import Request, urlopen
-
 import grpc
 from grpc import ServicerContext
-
+from internal.adapters.metrics import (
+    active_requests,
+    classify_error,
+    estimate_tokens,
+    grpc_request_duration_seconds,
+    grpc_requests_total,
+    health_check_total,
+    llm_errors_total,
+    llm_request_duration_seconds,
+    llm_requests_total,
+    llm_tokens_total,
+    generate_latest,
+    CONTENT_TYPE_LATEST,
+)
 from internal.core.helper_agent import Answer, HelperAgent, Question
 from internal.ports.llm import Message
 from proto import helper_pb2, helper_pb2_grpc
@@ -55,10 +67,14 @@ class HelperServicer(helper_pb2_grpc.HelperServiceServicer):
             )
             elapsed_ms = (time.monotonic() - start) * 1000
             logger.info("gRPC Ask done: answer_len=%d role=%s elapsed_ms=%.0f", len(result.text), result.detected_role or "none", elapsed_ms)
+            grpc_requests_total.labels(method="Ask", status="ok").inc()
+            grpc_request_duration_seconds.labels(method="Ask").observe(time.monotonic() - start)
             return helper_pb2.AskResponse(answer=result.text, detected_role=result.detected_role)
         except Exception:
             elapsed_ms = (time.monotonic() - start) * 1000
             logger.exception("gRPC Ask failed after %.0fms", elapsed_ms)
+            grpc_requests_total.labels(method="Ask", status="error").inc()
+            grpc_request_duration_seconds.labels(method="Ask").observe(time.monotonic() - start)
             raise
 
 
@@ -76,6 +92,7 @@ def _check_http_url(url: str, timeout: int = 3) -> tuple[str, str]:
 def _check_openai_compat(base_url: str, api_key: str, model: str, timeout: int = 5) -> tuple[str, str]:
     """Lightweight check for OpenAI-compatible API endpoints."""
     if not api_key:
+        health_check_total.labels(target="openai_compat", status="fail").inc()
         return "down", "missing api_key"
     try:
         import requests
@@ -85,29 +102,37 @@ def _check_openai_compat(base_url: str, api_key: str, model: str, timeout: int =
             timeout=timeout,
         )
         if resp.status_code == 200:
+            health_check_total.labels(target="openai_compat", status="ok").inc()
             return "ok", f"HTTP {resp.status_code}"
+        health_check_total.labels(target="openai_compat", status="fail").inc()
         return "down", f"HTTP {resp.status_code}: {resp.text[:100]}"
     except Exception as exc:
         logger.warning("health check openai_compat url=%s error=%s", base_url, exc)
+        health_check_total.labels(target="openai_compat", status="fail").inc()
         return "down", str(exc)
 
 
 def _check_ollama(base_url: str, model: str, timeout: int = 5) -> tuple[str, str]:
     """Check if Ollama is reachable and has the model."""
     if not base_url:
+        health_check_total.labels(target="ollama", status="fail").inc()
         return "down", "missing base_url"
     try:
         import requests
         resp = requests.get(f"{base_url.rstrip('/')}/api/tags", timeout=timeout)
         if resp.status_code != 200:
+            health_check_total.labels(target="ollama", status="fail").inc()
             return "down", f"HTTP {resp.status_code}: {resp.text[:100]}"
         data = resp.json()
         models = data.get("models", [])
         if any(m.get("name") == model for m in models):
+            health_check_total.labels(target="ollama", status="ok").inc()
             return "ok", f"model {model} found"
+        health_check_total.labels(target="ollama", status="fail").inc()
         return "down", f"model {model} not found"
     except Exception as exc:
         logger.warning("health check ollama url=%s error=%s", base_url, exc)
+        health_check_total.labels(target="ollama", status="fail").inc()
         return "down", str(exc)
 
 
@@ -124,10 +149,20 @@ class HealthHandler(http.server.BaseHTTPRequestHandler):
     def do_GET(self) -> None:
         if self.path == "/health":
             self._handle_health()
+        elif self.path == "/metrics":
+            self._handle_metrics()
         else:
             logger.warning("health unknown_path=%s", self.path)
             self.send_response(404)
             self.end_headers()
+    def _handle_metrics(self) -> None:
+        """Return Prometheus metrics in text format."""
+        body = generate_latest()
+        self.send_response(200)
+        self.send_header("Content-Type", CONTENT_TYPE_LATEST)
+        self.send_header("Content-Length", str(len(body)))
+        self.end_headers()
+        self.wfile.write(body)
 
     def _handle_health(self) -> None:
         status = {"status": "ok", "grpc": "ok", "adapters": "ok"}

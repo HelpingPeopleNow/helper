@@ -7,8 +7,17 @@ The system prompt is received from the backend via gRPC.
 """
 import json
 import logging
+import time
 from dataclasses import dataclass
-
+from internal.adapters.metrics import (
+    active_requests,
+    classify_error,
+    estimate_tokens,
+    llm_errors_total,
+    llm_request_duration_seconds,
+    llm_requests_total,
+    llm_tokens_total,
+)
 from internal.ports.llm import LLMPort, Message
 
 logger = logging.getLogger(__name__)
@@ -58,6 +67,13 @@ class HelperAgent:
         logger.info("HelperAgent: %d adapters loaded", len(adapters))
 
     def answer(self, question: Question, system_prompt: str, history: tuple[Message, ...] = (), llm_provider: str = "", skip_role_detection: bool = False) -> Answer:
+        active_requests.inc()
+        try:
+            return self._answer_inner(question, system_prompt, history, llm_provider, skip_role_detection)
+        finally:
+            active_requests.dec()
+
+    def _answer_inner(self, question: Question, system_prompt: str, history: tuple[Message, ...], llm_provider: str, skip_role_detection: bool) -> Answer:
         # Build provider chain
         if llm_provider:
             # Admin-set provider: try it first, then fall through the chain
@@ -82,18 +98,23 @@ class HelperAgent:
             if not llm:
                 logger.debug("No adapter for provider %r, skipping", provider)
                 continue
-
             logger.info("Trying LLM provider=%s (attempt %d/%d) sp_len=%d q_len=%d history=%d",
                         provider, i + 1, len(providers_chain),
                         len(system_prompt), len(question.text), len(history))
+            llm_requests_total.labels(provider=provider, mode="worker_intake").inc()
+            llm_start = time.monotonic()
             try:
                 raw = llm.complete(
                     system_prompt=system_prompt,
                     user=user_text,
                     history=history,
                 )
+                llm_request_duration_seconds.labels(provider=provider, mode="worker_intake").observe(time.monotonic() - llm_start)
+                llm_tokens_total.labels(provider=provider, direction="output").inc(estimate_tokens(raw))
                 return self._parse_response(raw)
             except Exception as e:
+                llm_request_duration_seconds.labels(provider=provider, mode="worker_intake").observe(time.monotonic() - llm_start)
+                llm_errors_total.labels(provider=provider, error_type=classify_error(e)).inc()
                 last_error = e
                 logger.warning("LLM provider %s failed: %s", provider, e)
                 continue

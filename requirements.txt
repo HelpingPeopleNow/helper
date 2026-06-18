@@ -36,3 +36,4 @@ uuid-utils==0.16.0
 websockets==16.0
 xxhash==3.7.0
 zstandard==0.25.0
+prometheus_client>=0.20.0
