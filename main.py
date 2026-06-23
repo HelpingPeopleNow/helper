@@ -61,7 +61,7 @@ def main():
         "ollama": {
             "kind": "ollama",
             "base_url": os.getenv("OLLAMA_BASE_URL", ""),
-            "model": os.getenv("OLLAMA_MODEL", "qwen3.5:0.8b"),
+            "model": os.getenv("OLLAMA_MODEL", "qwen2.5:1.5b"),
         },
     }
     if os.getenv("MISTRAL_API_KEY", "").strip():
