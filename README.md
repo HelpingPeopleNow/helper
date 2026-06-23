@@ -23,7 +23,8 @@ Stateless Python gRPC server that processes chat requests using LLM adapters. Re
 1. **Chat completion** — receives an `AskRequest` with question, history, system prompt, and LLM provider selector; returns an answer + detected user role
 2. **Multi-adapter fallback** — maintains OpenCode, Mistral, and Ollama adapters; the backend chooses which one per request via the `llm_provider` field; empty = automatic fallback chain (Mistral → OpenCode 1 → OpenCode 2 → Ollama)
 3. **Role detection** — the LLM's answer is scanned for worker/client intent; the system prompt instructs the model to return a role tag for classification; `skip_role_detection` flag suppresses this for profile intake chats
-4. **Health endpoint** — lightweight HTTP health check on a separate port for liveness probes
+4. **Embeddings (vector search)** — exposes `Embed` and `EmbedBatch` gRPC methods backed by an Ollama-hosted embedding model (`granite-embedding:278m`). Used by the backend to re-embed worker profile field changes for vector search.
+5. **Health + metrics sidecar** — HTTP `:8084` serves liveness probes AND Prometheus metrics; same port, separate handlers
 
 ---
 
@@ -142,15 +143,18 @@ message AskResponse {
 
 Proto definition: `proto/helper.proto` (shared with the backend repo)
 
-### Health Check
+### HTTP sidecar (health + metrics)
 
-A lightweight HTTP health check server runs alongside the gRPC service, using Python stdlib `http.server` (no extra dependencies).
+A lightweight HTTP server runs alongside the gRPC service on a separate port, using Python stdlib `http.server` (no extra dependencies). It serves both health checks AND Prometheus metrics.
 
 | Endpoint | Method | Response |
 |----------|--------|----------|
-| `/health` | GET | `{"status":"ok"}` (200) |
+| `/health` | GET | JSON. `200 → status: ok` if gRPC server is up and at least one LLM adapter is reachable; `503 → status: degraded` if not. Includes `grpc`, `adapters`, `adapter_results`, `adapter_details`, and `loaded_adapters`. |
+| `/metrics` | GET | Prometheus text format (`prometheus_client`). Includes `llm_requests_total`, `llm_request_duration_seconds`, `llm_errors_total`, `llm_tokens_total`, `grpc_requests_total`, `grpc_request_duration_seconds`, `health_check_total`, `active_requests`. |
 
 Port is configurable via the `HEALTH_PORT` env var (default: `8084`).
+
+The embedding model check is non-blocking — `health_check_total{target="ollama_embed"}` reflects its state without downgrading the overall status.
 
 ---
 
@@ -182,7 +186,21 @@ Requires `MISTRAL_API_KEY` env var.
 
 - Connects to a local Ollama instance at `OLLAMA_BASE_URL`
 - Uses raw `requests` (no langchain) — full prompt (system+history+user) is concatenated into a single string
-- Model: configurable via `OLLAMA_MODEL` (default: `qwen3:1.7b`)
+- Model: configurable via `OLLAMA_MODEL` (default: `qwen3.5:0.8b`)
+
+### Embedding provider
+
+Used by `Embed` and `EmbedBatch` gRPC methods (vector search backend path). Currently a single Ollama-backed adapter:
+
+| Adapter | Model | Base URL | Purpose |
+|---------|-------|----------|---------|
+| `embedding` | `granite-embedding:278m` | `OLLAMA_BASE_URL` | VECTOR_SEARCH_PLAN §7.4 — produces vectors for `worker_embeddings`. |
+
+Same `OLLAMA_BASE_URL` as the Ollama LLM adapter (same daemon). Model is configurable via `EMBEDDING_MODEL`.
+
+The proto definitions for `Embed` / `EmbedBatch` are in `proto/helper.proto`; both methods also report dimensions and the actual model used.
+
+If you'd like to swap providers, replace the `OllamaEmbeddingProvider` in `main.py` with another adapter that implements the `EmbeddingProvider` Protocol (`internal/adapters/embedding_provider.py`).
 
 ### Fallback Chain
 
@@ -258,8 +276,9 @@ Format:
 | `MISTRAL_API_KEY` | — | Mistral API key (optional; if not set, Mistral adapter is skipped) |
 | `MISTRAL_MODEL` | `mistral-large-latest` | Mistral model name |
 | `MISTRAL_BASE_URL` | `https://api.mistral.ai/v1` | Mistral API base URL |
-| `OLLAMA_BASE_URL` | `http://localhost:11434` | Ollama endpoint (used when provider=ollama) |
-| `OLLAMA_MODEL` | `qwen3:1.7b` | Ollama model name |
+| `OLLAMA_BASE_URL` | `http://localhost:11434` | Ollama endpoint (used by `ollama` provider AND the embedding adapter — same daemon) |
+| `OLLAMA_MODEL` | `qwen3.5:0.8b` | Ollama chat model name |
+| `EMBEDDING_MODEL` | `granite-embedding:278m` | Ollama embedding model name (vector search) |
 
 ---
 

@@ -7,10 +7,11 @@ Stateless Python gRPC server that processes chat requests through LLM adapters. 
 - **No tests, no lint, no typecheck** — only CI is Docker build/push (`docker.yml`). The only verification is that `python main.py` starts without error.
 - **OpenCode adapters use `langchain_openai.ChatOpenAI`** — both `opencode1` (deepseek-v4-flash-free) and `opencode2` (mimo-v2.5-free) go through the OpenAI-compatible API at `opencode.ai/zen/v1`.
 - **Mistral adapter uses `langchain_openai.ChatOpenAI`** — Mistral's API is OpenAI-compatible; requires `MISTRAL_API_KEY`.
-- **Ollama adapter uses raw `requests`** — no langchain; full prompt (system+history+user) is concatenated into a single string.
+- **Ollama adapter uses raw `requests`** — no langchain; full prompt (system+history+user) is concatenated into a single string. Default model `qwen3.5:0.8b`.
 - **JSON format instructions are appended to the user message**, not the system prompt — some providers ignore system formatting.
-- **Health HTTP endpoint** on `:8084` via stdlib `http.server` — serves `GET /health` → `{"status":"ok"}`.
+- **HTTP sidecar on `:8084`** via stdlib `http.server` — serves `GET /health` AND `GET /metrics` (Prometheus text). Health is post-startup dependency-aware (LLM adapter reachability).
 - **Fallback chain**: Mistral → OpenCode 1 → OpenCode 2 → Ollama (when no explicit provider is set).
+- **Embedding service**: helper also exposes `Embed` and `EmbedBatch` gRPC methods backed by `OllamaEmbeddingProvider` (`internal/adapters/embedding_provider.py`, default model `granite-embedding:278m`). Used by backend re-embed path; does NOT participate in chat fallback chain.
 
 ## Architecture
 
@@ -50,5 +51,6 @@ No `PYTHONPATH` needed when running from the project root.
 | `MISTRAL_API_KEY` | — | Optional; if not set, Mistral adapter is skipped |
 | `MISTRAL_MODEL` | `mistral-large-latest` | Mistral model |
 | `MISTRAL_BASE_URL` | `https://api.mistral.ai/v1` | Mistral API |
-| `OLLAMA_BASE_URL` | `http://localhost:11434` | Ollama endpoint |
-| `OLLAMA_MODEL` | `qwen2.5:1.5b` | Ollama model (fallback chat when cloud providers are down; per VECTOR_SEARCH_PLAN §17) |
+| `OLLAMA_BASE_URL` | `http://localhost:11434` | Ollama endpoint (LLM AND embedding share this daemon) |
+| `OLLAMA_MODEL` | `qwen2.5:1.5b` | Ollama chat model (fallback chat when cloud providers are down; per VECTOR_SEARCH_PLAN §17) |
+| `EMBEDDING_MODEL` | `granite-embedding:278m` | Ollama embedding model (vector search) |
