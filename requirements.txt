@@ -37,3 +37,4 @@ websockets==16.0
 xxhash==3.7.0
 zstandard==0.25.0
 prometheus_client>=0.20.0
+psycopg2-binary>=2.9.0

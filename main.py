@@ -1,12 +1,17 @@
-"""Application entry point — starts gRPC server.
+"""
+Application entry point — starts gRPC server.
 
 Loads all LLM adapters at startup. The backend selects which one to use
 per-request via the llm_provider gRPC field. Empty = default fallback chain:
 Mistral → OpenCode 1 → OpenCode 2 → Ollama.
+
+Also loads the embedding provider (VECTOR_SEARCH_PLAN §7.4) so the
+server can serve Embed/EmbedBatch RPCs alongside the chat path.
 """
 import logging
 import os
 
+from internal.adapters.embedding_provider import OllamaEmbeddingProvider
 from internal.adapters.grpc_server import configure_health_handler, serve_grpc, serve_health
 from internal.adapters.mistral_llm import MistralLLMAdapter
 from internal.adapters.opencode_llm import OpenCodeLLMAdapter
@@ -29,14 +34,12 @@ def require_env(key: str) -> str:
 def main():
     logger.info("=== Helper Service Starting ===")
 
-    # Validate required env vars before doing anything
     require_env("LLM_API_KEY")
     require_env("LLM_BASE_URL")
     require_env("LLM_MODEL")
     require_env("GRPC_PORT")
     require_env("HEALTH_PORT")
 
-    # Load ALL adapters so the backend can switch per-request
     adapters = {
         "opencode1": OpenCodeLLMAdapter(model="deepseek-v4-flash-free"),
         "opencode2": OpenCodeLLMAdapter(model="mimo-v2.5-free"),
@@ -71,27 +74,37 @@ def main():
         }
     else:
         logger.warning("MISTRAL_API_KEY not set; skipping Mistral adapter")
-    logger.info("Loaded adapters: %s", list(adapters.keys()))
+    logger.info("Loaded LLM adapters: %s", list(adapters.keys()))
+
+    # VECTOR_SEARCH_PLAN §7.4: embedding provider.
+    # Reads EMBEDDING_MODEL env var (default granite-embedding:278m) and
+    # OLLAMA_BASE_URL (same var the LLM adapters use — it's the same daemon).
+    embedding_provider = OllamaEmbeddingProvider(
+        base_url=os.getenv("OLLAMA_BASE_URL"),
+        model=os.getenv("EMBEDDING_MODEL", "granite-embedding:278m"),
+    )
+    adapter_details["embedding"] = {
+        "kind": "embedding",
+        "base_url": os.getenv("OLLAMA_BASE_URL", ""),
+        "model": embedding_provider.model,
+    }
+    logger.info("Embedding provider ready: model=%s", embedding_provider.model)
 
     assistant = HelperAgent(adapters=adapters)
     logger.info("HelperAgent initialized (no DB dependency, multi-adapter)")
-
-    # Default fallback chain: Mistral → OpenCode 1 → OpenCode 2 → Ollama
     logger.info("Default fallback chain: %s", HelperAgent.FALLBACK_CHAIN)
 
     grpc_port = int(os.getenv("GRPC_PORT", "50051"))
     logger.info("Starting gRPC server on port %d", grpc_port)
-    grpc_server = serve_grpc(assistant, port=grpc_port)
+    grpc_server = serve_grpc(assistant, embedding_provider=embedding_provider, port=grpc_port)
     logger.info("=== Helper Service Ready ===")
 
-    # Configure health handler with dependency info, then start it last
     configure_health_handler(
-        adapter_names=list(adapters.keys()),
+        adapter_names=list(adapters.keys()) + ["embedding"],
         grpc_server=grpc_server,
         adapter_details=adapter_details,
     )
 
-    # Start lightweight health HTTP endpoint
     health_port = int(os.getenv("HEALTH_PORT", "8084"))
     serve_health(port=health_port)
     logger.info("Health HTTP server on :%d", health_port)

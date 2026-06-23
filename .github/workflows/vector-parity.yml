@@ -1,0 +1,93 @@
+# Vector Embedding Byte-Parity Gate (VECTOR_SEARCH_PLAN §9.2 / §8.6)
+#
+# Mirror of backend/.github/workflows/vector-parity.yml — this side lives
+# in the helper repo so PRs that ONLY change helper/scripts can also be
+# gated without needing a backend change.
+#
+# Strategy:
+#   * Python script is local — checked out with this workflow.
+#   * Go fixture lives in the backend repo. Public-repo `git clone` works
+#     without a PAT (avoids the cross-repo actions/checkout auth gotcha).
+#
+# Output: exits non-zero if the two sides drift on any canonical
+# `name|text|hash` line for the shared fixtures.
+
+name: vector-parity
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+    branches: [main]
+  workflow_dispatch:
+
+# Cancel superseded runs on the same PR.
+concurrency:
+  group: vector-parity-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  parity:
+    name: python ⇄ go byte-parity
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+
+    steps:
+      - name: Check out helper
+        uses: actions/checkout@v4
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+
+      - name: Set up Go
+        uses: actions/setup-go@v5
+        with:
+          go-version: '1.25'
+          cache: true
+
+      - name: Shallow-clone backend for Go fixture
+        # Public sibling repo — no PAT needed for `git clone`.
+        run: |
+          git clone --depth 1 https://github.com/HelpingPeopleNow/backend.git /tmp/backend
+          test -f /tmp/backend/cmd/hash_fixture/main.go
+          echo "cloned backend ($(git -C /tmp/backend rev-parse --short HEAD))"
+
+      - name: Build Go hash_fixture (compile once, run twice)
+        working-directory: /tmp/backend
+        run: go build -o /tmp/hash_fixture ./cmd/hash_fixture
+
+      - name: Run Python --self-test (local script)
+        run: python3 scripts/backfill_embeddings.py --self-test
+
+      - name: Run Go hash_fixture (binary form, from cloned backend)
+        # Binary reuse avoids `go run` recompilation on every diff call.
+        run: /tmp/hash_fixture
+
+      - name: Capture canonical outputs to /tmp files
+        # Idempotent capture so the diff step doesn't re-invoke either side.
+        # Permissive regex [a-z][a-z_-]+ covers snake_case + hyphenated future
+        # field names.
+        run: |
+          set -euo pipefail
+          python3 scripts/backfill_embeddings.py --self-test 2>/dev/null \
+            | grep -E '^  [a-z][a-z_-]+\|' > /tmp/py_raw.txt
+          /tmp/hash_fixture 2>&1 \
+            | grep -E '^  [a-z][a-z_-]+\|' > /tmp/go_raw.txt
+
+      - name: Diff canonical name|text|hash lines
+        # sort -u dedupes hash collisions so a drift on a duplicate
+        # field name would surface instead of silently collapse.
+        run: |
+          set -euo pipefail
+          grep -E '^  [a-z][a-z_-]+\|' /tmp/py_raw.txt | sort -u > /tmp/py_canonical.txt
+          grep -E '^  [a-z][a-z_-]+\|' /tmp/go_raw.txt | sort -u > /tmp/go_canonical.txt
+          echo "--- python canonical ($(wc -l < /tmp/py_canonical.txt) unique lines) ---"
+          cat /tmp/py_canonical.txt
+          echo "--- go canonical ($(wc -l < /tmp/go_canonical.txt) unique lines) ---"
+          cat /tmp/go_canonical.txt
+          echo "--- diff -u (empty == parity OK) ---"
+          diff -u /tmp/py_canonical.txt /tmp/go_canonical.txt
+          echo "BYTE-PARITY CONFIRMED"

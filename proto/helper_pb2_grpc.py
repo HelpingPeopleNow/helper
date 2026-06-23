@@ -3,9 +3,9 @@
 import grpc
 import warnings
 
-from proto import helper_pb2 as helper__pb2
+import helper_pb2 as helper__pb2
 
-GRPC_GENERATED_VERSION = '1.81.0'
+GRPC_GENERATED_VERSION = '1.81.1'
 GRPC_VERSION = grpc.__version__
 _version_not_supported = False
 
@@ -39,6 +39,16 @@ class HelperServiceStub:
                 request_serializer=helper__pb2.AskRequest.SerializeToString,
                 response_deserializer=helper__pb2.AskResponse.FromString,
                 _registered_method=True)
+        self.Embed = channel.unary_unary(
+                '/helper.HelperService/Embed',
+                request_serializer=helper__pb2.EmbedRequest.SerializeToString,
+                response_deserializer=helper__pb2.EmbedResponse.FromString,
+                _registered_method=True)
+        self.EmbedBatch = channel.unary_unary(
+                '/helper.HelperService/EmbedBatch',
+                request_serializer=helper__pb2.EmbedBatchRequest.SerializeToString,
+                response_deserializer=helper__pb2.EmbedBatchResponse.FromString,
+                _registered_method=True)
 
 
 class HelperServiceServicer:
@@ -50,6 +60,23 @@ class HelperServiceServicer:
         context.set_details('Method not implemented!')
         raise NotImplementedError('Method not implemented!')
 
+    def Embed(self, request, context):
+        """Embed returns an embedding vector for a single text. Used by the backend
+        for both query-time search and incremental re-embedding.
+        """
+        context.set_code(grpc.StatusCode.UNIMPLEMENTED)
+        context.set_details('Method not implemented!')
+        raise NotImplementedError('Method not implemented!')
+
+    def EmbedBatch(self, request, context):
+        """EmbedBatch returns embeddings for a list of texts in one round-trip.
+        Used by the backfill script in helper/scripts/backfill_embeddings.py and
+        by any bulk path that needs more than one embedding at a time.
+        """
+        context.set_code(grpc.StatusCode.UNIMPLEMENTED)
+        context.set_details('Method not implemented!')
+        raise NotImplementedError('Method not implemented!')
+
 
 def add_HelperServiceServicer_to_server(servicer, server):
     rpc_method_handlers = {
@@ -57,6 +84,16 @@ def add_HelperServiceServicer_to_server(servicer, server):
                     servicer.Ask,
                     request_deserializer=helper__pb2.AskRequest.FromString,
                     response_serializer=helper__pb2.AskResponse.SerializeToString,
+            ),
+            'Embed': grpc.unary_unary_rpc_method_handler(
+                    servicer.Embed,
+                    request_deserializer=helper__pb2.EmbedRequest.FromString,
+                    response_serializer=helper__pb2.EmbedResponse.SerializeToString,
+            ),
+            'EmbedBatch': grpc.unary_unary_rpc_method_handler(
+                    servicer.EmbedBatch,
+                    request_deserializer=helper__pb2.EmbedBatchRequest.FromString,
+                    response_serializer=helper__pb2.EmbedBatchResponse.SerializeToString,
             ),
     }
     generic_handler = grpc.method_handlers_generic_handler(
@@ -86,6 +123,60 @@ class HelperService:
             '/helper.HelperService/Ask',
             helper__pb2.AskRequest.SerializeToString,
             helper__pb2.AskResponse.FromString,
+            options,
+            channel_credentials,
+            insecure,
+            call_credentials,
+            compression,
+            wait_for_ready,
+            timeout,
+            metadata,
+            _registered_method=True)
+
+    @staticmethod
+    def Embed(request,
+            target,
+            options=(),
+            channel_credentials=None,
+            call_credentials=None,
+            insecure=False,
+            compression=None,
+            wait_for_ready=None,
+            timeout=None,
+            metadata=None):
+        return grpc.experimental.unary_unary(
+            request,
+            target,
+            '/helper.HelperService/Embed',
+            helper__pb2.EmbedRequest.SerializeToString,
+            helper__pb2.EmbedResponse.FromString,
+            options,
+            channel_credentials,
+            insecure,
+            call_credentials,
+            compression,
+            wait_for_ready,
+            timeout,
+            metadata,
+            _registered_method=True)
+
+    @staticmethod
+    def EmbedBatch(request,
+            target,
+            options=(),
+            channel_credentials=None,
+            call_credentials=None,
+            insecure=False,
+            compression=None,
+            wait_for_ready=None,
+            timeout=None,
+            metadata=None):
+        return grpc.experimental.unary_unary(
+            request,
+            target,
+            '/helper.HelperService/EmbedBatch',
+            helper__pb2.EmbedBatchRequest.SerializeToString,
+            helper__pb2.EmbedBatchResponse.FromString,
             options,
             channel_credentials,
             insecure,

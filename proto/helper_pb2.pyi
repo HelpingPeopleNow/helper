@@ -35,3 +35,35 @@ class AskResponse(_message.Message):
     answer: str
     detected_role: str
     def __init__(self, answer: _Optional[str] = ..., detected_role: _Optional[str] = ...) -> None: ...
+
+class EmbedRequest(_message.Message):
+    __slots__ = ("text", "model")
+    TEXT_FIELD_NUMBER: _ClassVar[int]
+    MODEL_FIELD_NUMBER: _ClassVar[int]
+    text: str
+    model: str
+    def __init__(self, text: _Optional[str] = ..., model: _Optional[str] = ...) -> None: ...
+
+class EmbedResponse(_message.Message):
+    __slots__ = ("embedding", "model", "dimensions")
+    EMBEDDING_FIELD_NUMBER: _ClassVar[int]
+    MODEL_FIELD_NUMBER: _ClassVar[int]
+    DIMENSIONS_FIELD_NUMBER: _ClassVar[int]
+    embedding: _containers.RepeatedScalarFieldContainer[float]
+    model: str
+    dimensions: int
+    def __init__(self, embedding: _Optional[_Iterable[float]] = ..., model: _Optional[str] = ..., dimensions: _Optional[int] = ...) -> None: ...
+
+class EmbedBatchRequest(_message.Message):
+    __slots__ = ("texts", "model")
+    TEXTS_FIELD_NUMBER: _ClassVar[int]
+    MODEL_FIELD_NUMBER: _ClassVar[int]
+    texts: _containers.RepeatedScalarFieldContainer[str]
+    model: str
+    def __init__(self, texts: _Optional[_Iterable[str]] = ..., model: _Optional[str] = ...) -> None: ...
+
+class EmbedBatchResponse(_message.Message):
+    __slots__ = ("embeddings",)
+    EMBEDDINGS_FIELD_NUMBER: _ClassVar[int]
+    embeddings: _containers.RepeatedCompositeFieldContainer[EmbedResponse]
+    def __init__(self, embeddings: _Optional[_Iterable[_Union[EmbedResponse, _Mapping]]] = ...) -> None: ...

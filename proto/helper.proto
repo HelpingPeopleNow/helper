@@ -6,6 +6,13 @@ option go_package = "github.com/HelpingPeopleNow/backend/proto/helper";
 
 service HelperService {
   rpc Ask(AskRequest) returns (AskResponse);
+  // Embed returns an embedding vector for a single text. Used by the backend
+  // for both query-time search and incremental re-embedding.
+  rpc Embed(EmbedRequest) returns (EmbedResponse);
+  // EmbedBatch returns embeddings for a list of texts in one round-trip.
+  // Used by the backfill script in helper/scripts/backfill_embeddings.py and
+  // by any bulk path that needs more than one embedding at a time.
+  rpc EmbedBatch(EmbedBatchRequest) returns (EmbedBatchResponse);
 }
 
 message Message {
@@ -24,4 +31,44 @@ message AskRequest {
 message AskResponse {
   string answer = 1;
   string detected_role = 2;  // "worker" | "client" | ""
+}
+
+// ── Embedding RPCs (VECTOR_SEARCH_PLAN §7.1) ────────────────────────
+
+message EmbedRequest {
+  // The text to embed. For worker profiles this is a field-specific text
+  // (e.g. just the profession); for search this is the raw user query.
+  string text = 1;
+
+  // Optional model override. Empty string means: use the helper's default
+  // embedding model (EMBEDDING_MODEL env var, e.g. "granite-embedding:278m").
+  // Allows future migration to a different model without redeploying backend.
+  string model = 2;
+}
+
+message EmbedResponse {
+  // The embedding vector. 768 dimensions for granite-embedding:278m.
+  // `repeated float` is wire-cheap: each dim is 4 bytes, packed array.
+  repeated float embedding = 1;
+
+  // Echo of the model used (either from request or the helper default).
+  string model = 2;
+
+  // Dimensions. Redundant with len(embedding) but useful for validation
+  // before persisting (vector dimension mismatch silently corrupts search).
+  int32 dimensions = 3;
+}
+
+message EmbedBatchRequest {
+  // Multiple texts to embed in a single request.
+  // Batch embedding for backfill efficiency.
+  repeated string texts = 1;
+
+  // Optional model override.
+  string model = 2;
+}
+
+message EmbedBatchResponse {
+  // One embedding per input text, in the same order as request.texts.
+  repeated EmbedResponse embeddings = 1;
 }
