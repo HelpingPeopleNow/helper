@@ -148,6 +148,7 @@ class OllamaEmbeddingProvider(EmbeddingProvider):
                     return "ok", f"model {self._model} available"
                 return "down", f"model {self._model} not pulled"
         except Exception as exc:
+            logger.warning("ollama embedding health error: %s", exc)
             return "down", str(exc)
 
 

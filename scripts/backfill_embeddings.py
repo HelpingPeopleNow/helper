@@ -122,6 +122,7 @@ def _join_json_array(json_str: str) -> str:
     try:
         arr = json.loads(json_str)
     except (ValueError, TypeError):
+        logger.warning("join_json_array: failed to parse JSON, falling back to raw text")
         return json_str
     if not isinstance(arr, list):
         return json_str
@@ -239,6 +240,7 @@ def open_grpc(addr: str):
     try:
         grpc.channel_ready_future(channel).result(timeout=5)
     except Exception as exc:
+        logger.error("helper gRPC at %s not ready: %s", addr, exc)
         channel.close()
         raise RuntimeError(f"helper gRPC at {addr} not ready: {exc}")
     return helper_pb2_grpc.HelperServiceStub(channel), channel
