@@ -7,7 +7,7 @@ Stateless Python gRPC server that processes chat requests through LLM adapters. 
 - **No tests, no lint, no typecheck** — only CI is Docker build/push (`docker.yml`). The only verification is that `python main.py` starts without error.
 - **OpenCode adapters use `langchain_openai.ChatOpenAI`** — both `opencode1` (deepseek-v4-flash-free) and `opencode2` (mimo-v2.5-free) go through the OpenAI-compatible API at `opencode.ai/zen/v1`.
 - **Mistral adapter uses `langchain_openai.ChatOpenAI`** — Mistral's API is OpenAI-compatible; requires `MISTRAL_API_KEY`.
-- **Ollama adapter uses raw `requests`** — no langchain; full prompt (system+history+user) is concatenated into a single string. Default model `qwen3.5:0.8b`.
+- **Ollama adapter uses raw `requests`** — no langchain; full prompt (system+history+user) is concatenated into a single string. Production default model `qwen2.5:1.5b` (set in `main.py` from `OLLAMA_MODEL`; `infra/docker-compose-dev.yaml` mirrors this). Note: `OllamaLLMAdapter.__init__` also has its own default of `qwen3.5:0.8b`, but it is unreachable because `main.py` always passes `OLLAMA_MODEL` explicitly.
 - **JSON format instructions are appended to the user message**, not the system prompt — some providers ignore system formatting.
 - **HTTP sidecar on `:8084`** via stdlib `http.server` — serves `GET /health` AND `GET /metrics` (Prometheus text). Health is post-startup dependency-aware (LLM adapter reachability).
 - **Fallback chain**: Mistral → OpenCode 1 → OpenCode 2 → Ollama (when no explicit provider is set).
