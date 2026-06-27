@@ -60,7 +60,7 @@ class HelperAgent:
     """
 
     # Default fallback chain when no explicit provider is set
-    FALLBACK_CHAIN = ["mistral", "opencode1", "opencode2", "ollama"]
+    FALLBACK_CHAIN = ["mistral", "opencode0", "opencode1", "opencode2", "ollama"]
 
     def __init__(self, adapters: dict[str, LLMPort]) -> None:
         self._adapters = adapters

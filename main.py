@@ -41,11 +41,18 @@ def main():
     require_env("HEALTH_PORT")
 
     adapters = {
+        "opencode0": OpenCodeLLMAdapter(model="big-pickle"),
         "opencode1": OpenCodeLLMAdapter(model="deepseek-v4-flash-free"),
         "opencode2": OpenCodeLLMAdapter(model="mimo-v2.5-free"),
         "ollama": OllamaLLMAdapter(),
     }
     adapter_details = {
+        "opencode0": {
+            "kind": "openai_compat",
+            "base_url": os.getenv("LLM_BASE_URL", "https://opencode.ai/zen/v1"),
+            "api_key": os.getenv("LLM_API_KEY", ""),
+            "model": "big-pickle",
+        },
         "opencode1": {
             "kind": "openai_compat",
             "base_url": os.getenv("LLM_BASE_URL", "https://opencode.ai/zen/v1"),
