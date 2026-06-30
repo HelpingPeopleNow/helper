@@ -23,7 +23,7 @@ Stateless Python gRPC server that processes chat requests through LLM adapters a
 ## What It Does
 
 1. **Chat completion** — receives an `AskRequest` with question, history, system prompt, and LLM provider selector; returns an answer + detected user role.
-2. **Multi-adapter fallback** — loads `opencode1`, `opencode2`, `ollama` unconditionally and `mistral` only when `MISTRAL_API_KEY` is set; the backend chooses which one per request via the `llm_provider` field; empty = automatic fallback chain (Mistral → OpenCode 1 → OpenCode 2 → Ollama).
+2. **Multi-adapter fallback** — loads `opencode0`, `opencode1`, `opencode2`, `ollama` unconditionally and `mistral` only when `MISTRAL_API_KEY` is set; the backend chooses which one per request via the `llm_provider` field; empty = automatic fallback chain (Mistral → OpenCode 0 → OpenCode 1 → OpenCode 2 → Ollama).
 3. **Role detection** — the LLM's answer is scanned for worker/client intent; the system prompt instructs the model to return a role tag for classification. `skip_role_detection` flag suppresses this for profile intake chats. (Backend always sends `skip_role_detection=true` today.)
 4. **Embeddings (vector search)** — exposes `Embed` and `EmbedBatch` gRPC methods backed by `OllamaEmbeddingProvider` (`granite-embedding:278m`, 768 dims). Used by the backend to re-embed worker profile field changes for vector search.
 5. **Health + metrics sidecar** — HTTP `:8084` (stdlib `http.server`) serves liveness probes AND Prometheus metrics on the same port.
@@ -39,6 +39,7 @@ Stateless Python gRPC server that processes chat requests through LLM adapters a
 │   starts gRPC + health server)                                │
 │                                                               │
 │  adapters = {                                                 │
+│      "opencode0": OpenCodeLLMAdapter(model="big-pickle"),     │
 │      "opencode1": OpenCodeLLMAdapter(model="deepseek-…-free"),│
 │      "opencode2": OpenCodeLLMAdapter(model="mimo-v2.5-free"), │
 │      "ollama":    OllamaLLMAdapter(),                         │
@@ -79,8 +80,8 @@ Stateless Python gRPC server that processes chat requests through LLM adapters a
 │    │   └─ on failure: fall through to next provider           │
 │    └─ parse response: JSON {"answer","role"} or raw text      │
 │                                                               │
-│  FALLBACK_CHAIN = ["mistral", "opencode1", "opencode2",       │
-│                    "ollama"]                                  │
+│  FALLBACK_CHAIN = ["mistral", "opencode0", "opencode1",       │
+│                    "opencode2", "ollama"]                     │
 └───────────────────────────────────────────────────────────────┘
 ```
 
@@ -89,7 +90,7 @@ Stateless Python gRPC server that processes chat requests through LLM adapters a
 - **Stateless** — no database connection, no file storage. Everything it needs comes via gRPC from the backend. A lightweight health HTTP endpoint is available for liveness checks.
 - **Port-based** — `LLMPort` is a Python `Protocol` class (`internal/ports/llm.py`); all adapters implement it. `EmbeddingProvider` is a similar informal class in `internal/adapters/embedding_provider.py`. Adding a new provider requires only a new adapter class.
 - **Runtime provider switching** — the backend chooses the adapter per request. The helper never restarts when the provider changes.
-- **Fallback chain** — when no explicit provider is set (or the chosen one fails), adapters are tried in order: Mistral → OpenCode 1 → OpenCode 2 → Ollama. The chain is built in `HelperAgent._answer_inner` — Mistral only participates if the Mistral adapter was loaded (i.e., `MISTRAL_API_KEY` is set).
+- **Fallback chain** — when no explicit provider is set (or the chosen one fails), adapters are tried in order: Mistral → OpenCode 0 → OpenCode 1 → OpenCode 2 → Ollama. The chain is built in `HelperAgent._answer_inner` — Mistral only participates if the Mistral adapter was loaded (i.e., `MISTRAL_API_KEY` is set).
 
 ---
 
@@ -103,18 +104,18 @@ AskRequest {
     question: "I need a plumber",
     history: [{role: "user", content: "hello"}],
     system_prompt: "You are a home services assistant...",
-    llm_provider: "opencode1"  // or "opencode2", "mistral", "ollama", ""
+    llm_provider: "opencode1"  // or "opencode0", "opencode2", "mistral", "ollama", ""
     skip_role_detection: false  // true for worker/client intake chats
 }
        │
        ▼
 grpc_server.py
-  ├─ log: provider=opencode1 (request='opencode1' default=mistral)
+  ├─ log: provider=opencode1 (request='opencode1' default=opencode0)
   └─ helper_agent.answer(...)
        │
        ▼
 helper_agent.py
-  ├─ providers_chain = ["opencode1", "mistral", "opencode2", "ollama"]
+  ├─ providers_chain = ["opencode1", "mistral", "opencode0", "opencode2", "ollama"]
   ├─ for provider in chain: try adapter.complete(system_prompt, user, history)
   └─ return _parse_response(raw)
        │
@@ -146,7 +147,7 @@ message AskRequest {
   string question = 1;
   repeated Message history = 2;        // chat history context
   string system_prompt = 3;            // loaded by backend from DB
-  string llm_provider = 4;             // "opencode1" | "opencode2" | "mistral" | "ollama" | "" (= fallback chain)
+  string llm_provider = 4;             // "opencode0" | "opencode1" | "opencode2" | "mistral" | "ollama" | "" (= fallback chain)
   bool skip_role_detection = 5;        // if true, don't append JSON role-detection instructions
 }
 
@@ -195,14 +196,15 @@ The embedding model check is non-blocking — Ollama is treated as "optional/loc
 
 ## LLM Adapters
 
-### OpenCode (External) — 2 instances
+### OpenCode (External) — 3 instances
 
-Both use `langchain_openai.ChatOpenAI` (OpenAI-compatible API). Models are pinned in `main.py` (not env-driven):
+All use `langchain_openai.ChatOpenAI` (OpenAI-compatible API). Models are pinned in `main.py` (not env-driven):
 
 | Adapter | Model (hardcoded in main.py) | Base URL | Notes |
 |---------|------------------------------|----------|-------|
-| `opencode1` | `deepseek-v4-flash-free` | `LLM_BASE_URL` (default `https://opencode.ai/zen/v1`) | Primary OpenCode model |
-| `opencode2` | `mimo-v2.5-free` | `LLM_BASE_URL` | Secondary OpenCode model |
+| `opencode0` | `big-pickle` | `LLM_BASE_URL` (default `https://opencode.ai/zen/v1`) | Primary OpenCode model (fast) |
+| `opencode1` | `deepseek-v4-flash-free` | `LLM_BASE_URL` | Secondary OpenCode model |
+| `opencode2` | `mimo-v2.5-free` | `LLM_BASE_URL` | Tertiary OpenCode model |
 
 Both adapters' constructor overrides accept `(model, base_url, api_key, temperature=0.3)` from env if not set in `main.py`. LangChain timeout: 20s (fail-fast).
 
@@ -217,7 +219,7 @@ Requires `MISTRAL_API_KEY`. When unset, the adapter is skipped — `main.py` log
 ### Ollama (Local)
 
 - Connects to a local Ollama instance at `OLLAMA_BASE_URL` (default `http://localhost:11434`).
-- Uses raw `requests` (no langchain) — full prompt (system+history+user) is concatenated into a single string and POSTed to `/api/generate`.
+- Uses raw `requests` (no langchain) — full prompt (system+history+user) is concatenated into a single string and POSTed to `/api/generate` with `stream=False, think=False`.
 - Model: env `OLLAMA_MODEL` (default in `OllamaLLMAdapter.__init__` is `qwen3.5:0.8b`, but `main.py` always passes `OLLAMA_MODEL` explicitly so the runtime default is whatever compose sets — `qwen2.5:1.5b` in production per `infra/docker-compose.yml`).
 
 ### Embedding provider
@@ -233,10 +235,10 @@ The proto definitions for `Embed` / `EmbedBatch` are in `proto/helper.proto`; bo
 ### Fallback Chain
 
 ```
-Mistral → OpenCode 1 → OpenCode 2 → Ollama
+Mistral → OpenCode 0 → OpenCode 1 → OpenCode 2 → Ollama
 ```
 
-`HelperAgent.FALLBACK_CHAIN = ["mistral", "opencode1", "opencode2", "ollama"]` is the canonical chain. The `mistral` entry is silently skipped at runtime if the adapter wasn't loaded (no `MISTRAL_API_KEY`).
+`HelperAgent.FALLBACK_CHAIN = ["mistral", "opencode0", "opencode1", "opencode2", "ollama"]` is the canonical chain. The `mistral` entry is silently skipped at runtime if the adapter wasn't loaded (no `MISTRAL_API_KEY`).
 
 If an explicit `llm_provider` is set, it's tried first, then the remaining providers in fallback order.
 
@@ -257,6 +259,7 @@ Then add it in `main.py`:
 
 ```python
 adapters = {
+    "opencode0": OpenCodeLLMAdapter(...),
     "opencode1": OpenCodeLLMAdapter(...),
     "opencode2": OpenCodeLLMAdapter(...),
     "ollama": OllamaLLMAdapter(...),

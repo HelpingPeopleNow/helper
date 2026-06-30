@@ -3,7 +3,7 @@ Application entry point — starts gRPC server.
 
 Loads all LLM adapters at startup. The backend selects which one to use
 per-request via the llm_provider gRPC field. Empty = default fallback chain:
-Mistral → OpenCode 1 → OpenCode 2 → Ollama.
+Mistral → OpenCode 0 → OpenCode 1 → OpenCode 2 → Ollama.
 
 Also loads the embedding provider (VECTOR_SEARCH_PLAN §7.4) so the
 server can serve Embed/EmbedBatch RPCs alongside the chat path.
