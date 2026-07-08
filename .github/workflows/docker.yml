@@ -15,10 +15,27 @@ env:
   IMAGE_NAME: ${{ github.repository }}
 
 jobs:
+  test:
+    name: Unit tests
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v7
+      - uses: actions/setup-python@v6
+        with:
+          python-version: '3.12'
+          cache: pip
+      - name: Install deps + test extras
+        run: |
+          pip install -r requirements.txt
+          pip install pytest==8.3 respx==0.22
+      - name: Run unit tests
+        run: pytest -v tests/
+
   validate:
     name: Validate Docker Build
     runs-on: ubuntu-latest
     if: github.event_name == 'pull_request'
+    needs: test
     steps:
       - uses: actions/checkout@v7
       - uses: docker/setup-buildx-action@v4
@@ -32,6 +49,7 @@ jobs:
     name: Build & Push
     runs-on: ubuntu-latest
     if: github.event_name == 'push' && github.ref == 'refs/heads/main'
+    needs: test
     permissions:
       contents: read
       packages: write

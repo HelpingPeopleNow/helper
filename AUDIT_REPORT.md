@@ -15,18 +15,18 @@ However, the service is **not production-hardened against the three failure clas
 
 **Top risks (one line each):**
 
-| # | Risk | Class | Sev |
-|---|------|-------|-----|
-| R1 | gRPC is `insecure_port` + **no authn** → anyone on the network can burn LLM tokens / exfiltrate answers | Security + Cost | **P0** |
-| R2 | `/health` does **live upstream `/models` calls on every probe** → readiness flaps the pod out of service on a transient blip and hammers the provider | Reliability | **P0** |
-| R3 | Single shared `ThreadPoolExecutor(max_workers=10)` + sequential `EmbedBatch` (≤30s/text) + **no `maximum_concurrent_rpcs`** → one backfill starves all chat RPCs | Reliability | **P0** |
-| R4 | **No overall request deadline / no client-deadline propagation**; chain walks 20s×4 + 60s Ollama ≈ 140s while the caller has already timed out → retry storm + wasted spend | Reliability + Cost | **P1** |
-| R5 | **Mistral-large (most expensive model) is FIRST** in the auto fallback chain → every default request pays the premium model first | Cost | **P1** |
-| R6 | Health/metrics served by **single-threaded `HTTPServer`** → a slow `/health` blocks `/metrics` → Prometheus scrape timeout → observability blind spot during incidents | Reliability | **P1** |
-| R7 | Container runs as **root**, `COPY . .`, no `HEALTHCHECK`, ships `psycopg2` the server never uses; supply-chain pins have **no integrity hashes** | Security | **P1** |
-| R8 | No input-size cap on `question`/`text` → unbounded prompt forwarded to paid APIs (cost + memory) | Cost | **P2** |
-| R9 | No graceful shutdown (`SIGTERM` → abrupt kill of in-flight RPCs on every rollout) | Reliability | **P2** |
-| R10 | `auth_errors_total` is documented in README but **does not exist** in `metrics.py`; `classify_error` heuristics misclassify | Observability | **P3** |
+| # | Risk | Class | Sev | Fix Status |
+|---|------|-------|-----|------------|
+| R1 | gRPC is `insecure_port` + **no authn** → anyone on the network can burn LLM tokens / exfiltrate answers | Security + Cost | **P0** | **FIXED** — `grpc_server.py:_AuthInterceptor` (shared-secret bearer, constant-time compare), TLS optional via `GRPC_TLS_CERT/KEY_PATH` |
+| R2 | `/health` does **live upstream `/models` calls on every probe** → readiness flaps the pod out of service on a transient blip and hammers the provider | Reliability | **P0** | **FIXED** — `grpc_server.py:_refresh_health_cache` background thread (TTL=20s), `/health` reads cache, `/ready` is cheap (gRPC up + last cache) |
+| R3 | Single shared `ThreadPoolExecutor(max_workers=10)` + sequential `EmbedBatch` (≤30s/text) + **no `maximum_concurrent_rpcs`** → one backfill starves all chat RPCs | Reliability | **P0** | **FIXED** — `grpc_server.py:serve_grpc` uses `GRPC_MAX_WORKERS=16`, `GRPC_MAX_CONCURRENT_RPCS=32`, configurable message size, keepalive |
+| R4 | **No overall request deadline / no client-deadline propagation**; chain walks 20s×4 + 60s Ollama ≈ 140s while the caller has already timed out → retry storm + wasted spend | Reliability + Cost | **P1** | **FIXED** — `helper_agent.py:REQUEST_BUDGET_S=45.0` + `deadline_s` parameter, budget check in `_answer_inner` loop; `grpc_server.py` passes `context.time_remaining()` |
+| R5 | **Mistral-large (most expensive model) is FIRST** in the auto fallback chain → every default request pays the premium model first | Cost | **P1** | **FIXED** — `helper_agent.py:FALLBACK_CHAIN` cheap-first: `opencode0,opencode1,opencode2,mistral,ollama`, configurable via `FALLBACK_CHAIN` env |
+| R6 | Health/metrics served by **single-threaded `HTTPServer`** → a slow `/health` blocks `/metrics` → Prometheus scrape timeout → observability blind spot during incidents | Reliability | **P1** | **FIXED** — `grpc_server.py:serve_health` uses `http.server.ThreadingHTTPServer` |
+| R7 | Container runs as **root**, `COPY . .`, no `HEALTHCHECK`, ships `psycopg2` the server never uses; supply-chain pins have **no integrity hashes** | Security | **P1** | **FIXED** — `Dockerfile`: `RUN useradd ... && USER helper`, explicit `COPY main.py internal/ proto/`, `HEALTHCHECK` via cached `/health`, removed `EXPOSE 8085`; `.dockerignore` added |
+| R8 | No input-size cap on `question`/`text` → unbounded prompt forwarded to paid APIs (cost + memory) | Cost | **P2** | **FIXED** — `grpc_server.py:MAX_QUESTION_LENGTH=32000` (env), `INVALID_ARGUMENT` rejection in `Ask` |
+| R9 | No graceful shutdown (`SIGTERM` → abrupt kill of in-flight RPCs on every rollout) | Reliability | **P2** | **FIXED** — `main.py:SIGTERM/SIGINT` handler → `shutdown_event.wait()` → `grpc_server.stop(grace=30)` |
+| R10 | `auth_errors_total` is documented in README but **does not exist** in `metrics.py`; `classify_error` heuristics misclassify | Observability | **P3** | **FIXED** — `metrics.py`: added `auth_errors_total` counter, `classify_error` uses explicit `isinstance` checks before substring fallback |
 
 **Verdict:** Architecturally sound, operationally fragile. The P0 set is small and self-contained — closing R1–R3 removes the dominant outage and cost-incident vectors without touching the domain core (the hexagonal boundary makes these adapter-layer-only changes).
 

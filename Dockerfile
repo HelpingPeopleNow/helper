@@ -3,10 +3,16 @@ FROM python:3.12-slim
 WORKDIR /app
 
 COPY requirements.txt .
-RUN pip install --no-cache-dir -r requirements.txt && \
-    echo "Helper built with whisper support"
+RUN pip install --no-cache-dir -r requirements.txt
 
-COPY . .
+# R7: explicit COPY (not COPY . .) — only what the server needs.
+COPY main.py ./
+COPY internal ./internal
+COPY proto ./proto
+
+# R7: non-root user.
+RUN useradd --create-home --uid 10001 helper && chown -R helper:helper /app
+USER helper
 
 # /app on path lets `from internal.adapters...` and `from proto import ...` resolve.
 # /app/proto on path ALSO matters — the protoc-generated helper_pb2_grpc.py begins
@@ -18,6 +24,9 @@ ENV PYTHONUNBUFFERED=1
 
 EXPOSE 50051
 EXPOSE 8084
-EXPOSE 8085
+
+# R7: container-level liveness (uses the cached /health).
+HEALTHCHECK --interval=30s --timeout=5s --start-period=20s --retries=3 \
+    CMD python -c "import urllib.request,sys; sys.exit(0 if urllib.request.urlopen('http://127.0.0.1:8084/health',timeout=4).status==200 else 1)"
 
 CMD ["python", "main.py"]

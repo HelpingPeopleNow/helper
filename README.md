@@ -23,7 +23,7 @@ Stateless Python gRPC server that processes chat requests through LLM adapters a
 ## What It Does
 
 1. **Chat completion** — receives an `AskRequest` with question, history, system prompt, and LLM provider selector; returns an answer + detected user role.
-2. **Multi-adapter fallback** — loads `opencode0`, `opencode1`, `opencode2`, `ollama` unconditionally and `mistral` only when `MISTRAL_API_KEY` is set; the backend chooses which one per request via the `llm_provider` field; empty = automatic fallback chain (Mistral → OpenCode 0 → OpenCode 1 → OpenCode 2 → Ollama).
+2. **Multi-adapter fallback** — loads `opencode0`, `opencode1`, `opencode2`, `ollama` unconditionally and `mistral` only when `MISTRAL_API_KEY` is set; the backend chooses which one per request via the `llm_provider` field; empty = automatic fallback chain (OpenCode 0 → OpenCode 1 → OpenCode 2 → Mistral → Ollama). Cheap-first order (R5); env-configurable via `FALLBACK_CHAIN`.
 3. **Role detection** — the LLM's answer is scanned for worker/client intent; the system prompt instructs the model to return a role tag for classification. `skip_role_detection` flag suppresses this for profile intake chats. (Backend always sends `skip_role_detection=true` today.)
 4. **Embeddings (vector search)** — exposes `Embed` and `EmbedBatch` gRPC methods backed by `OllamaEmbeddingProvider` (`granite-embedding:278m`, 768 dims). Used by the backend to re-embed worker profile field changes for vector search.
 5. **Health + metrics sidecar** — HTTP `:8084` (stdlib `http.server`) serves liveness probes AND Prometheus metrics on the same port.
@@ -80,8 +80,8 @@ Stateless Python gRPC server that processes chat requests through LLM adapters a
 │    │   └─ on failure: fall through to next provider           │
 │    └─ parse response: JSON {"answer","role"} or raw text      │
 │                                                               │
-│  FALLBACK_CHAIN = ["mistral", "opencode0", "opencode1",       │
-│                    "opencode2", "ollama"]                     │
+│  FALLBACK_CHAIN = ["opencode0", "opencode1",                 │
+│                    "opencode2", "mistral", "ollama"]         │
 └───────────────────────────────────────────────────────────────┘
 ```
 
@@ -90,7 +90,7 @@ Stateless Python gRPC server that processes chat requests through LLM adapters a
 - **Stateless** — no database connection, no file storage. Everything it needs comes via gRPC from the backend. A lightweight health HTTP endpoint is available for liveness checks.
 - **Port-based** — `LLMPort` is a Python `Protocol` class (`internal/ports/llm.py`); all adapters implement it. `EmbeddingProvider` is a similar informal class in `internal/adapters/embedding_provider.py`. Adding a new provider requires only a new adapter class.
 - **Runtime provider switching** — the backend chooses the adapter per request. The helper never restarts when the provider changes.
-- **Fallback chain** — when no explicit provider is set (or the chosen one fails), adapters are tried in order: Mistral → OpenCode 0 → OpenCode 1 → OpenCode 2 → Ollama. The chain is built in `HelperAgent._answer_inner` — Mistral only participates if the Mistral adapter was loaded (i.e., `MISTRAL_API_KEY` is set).
+- **Fallback chain** — when no explicit provider is set (or the chosen one fails), adapters are tried in order: OpenCode 0 → OpenCode 1 → OpenCode 2 → Mistral → Ollama (cheap-first, R5). The chain is built in `HelperAgent._answer_inner`; env-configurable via `FALLBACK_CHAIN` env var. Mistral only participates if the Mistral adapter was loaded (i.e., `MISTRAL_API_KEY` is set).
 
 ---
 
@@ -235,10 +235,10 @@ The proto definitions for `Embed` / `EmbedBatch` are in `proto/helper.proto`; bo
 ### Fallback Chain
 
 ```
-Mistral → OpenCode 0 → OpenCode 1 → OpenCode 2 → Ollama
+OpenCode 0 → OpenCode 1 → OpenCode 2 → Mistral → Ollama
 ```
 
-`HelperAgent.FALLBACK_CHAIN = ["mistral", "opencode0", "opencode1", "opencode2", "ollama"]` is the canonical chain. The `mistral` entry is silently skipped at runtime if the adapter wasn't loaded (no `MISTRAL_API_KEY`).
+`HelperAgent.FALLBACK_CHAIN = ["opencode0", "opencode1", "opencode2", "mistral", "ollama"]` is the canonical chain (cheap-first, R5). The `mistral` entry is silently skipped at runtime if the adapter wasn't loaded (no `MISTRAL_API_KEY`). Chain order is env-configurable via `FALLBACK_CHAIN=opencode0,opencode1,opencode2,mistral,ollama`.
 
 If an explicit `llm_provider` is set, it's tried first, then the remaining providers in fallback order.
 
@@ -298,7 +298,7 @@ Format:
 
 ## Environment Variables
 
-Required at startup (via `require_env` in `main.py`): `LLM_API_KEY`, `LLM_BASE_URL`, `LLM_MODEL`, `GRPC_PORT`, `HEALTH_PORT`. Missing values exit 1.
+Required at startup (via `require_env` in `main.py`): `LLM_API_KEY`, `LLM_BASE_URL`, `LLM_MODEL`, `GRPC_PORT`, `HEALTH_PORT`. Missing values exit 1. `HELPER_AUTH_TOKEN` is optional — empty string means no gRPC auth is enforced.
 
 Optional:
 
@@ -315,6 +315,13 @@ Optional:
 | `OLLAMA_BASE_URL` | `http://localhost:11434` | Ollama endpoint (used by `ollama` provider AND `OllamaEmbeddingProvider` — same daemon) |
 | `OLLAMA_MODEL` | `qwen2.5:1.5b` (production) | Ollama chat model name (passed by `main.py` from env) |
 | `EMBEDDING_MODEL` | `granite-embedding:278m` | Ollama embedding model name (vector search) |
+| `HELPER_AUTH_TOKEN` | — | gRPC auth token (Bearer); empty = no auth (R1) |
+| `GRPC_MAX_CONCURRENT_RPCS` | `32` | Server `maximum_concurrent_rpcs` (R3) |
+| `GRPC_MAX_WORKERS` | `16` | Thread pool `max_workers` for gRPC (R6) |
+| `HEALTH_CACHE_TTL_S` | `20` | Health cache TTL in seconds (R2) |
+| `MAX_QUESTION_LENGTH` | `32000` | Max question chars; longer → `INVALID_ARGUMENT` (R8) |
+| `REQUEST_BUDGET_S` | `45.0` | Per-request LLM budget in seconds (R4) |
+| `FALLBACK_CHAIN` | `opencode0,opencode1,opencode2,mistral,ollama` | Comma-separated fallback order (R5) |
 
 ---
 
@@ -330,6 +337,14 @@ python main.py
 # Smoke test — server should bind 50051 (gRPC) + 8084 (HTTP sidecar)
 python main.py
 
+# Run tests (128 tests, requires requirements-dev.txt)
+pip install -r requirements-dev.txt
+pytest -v tests/
+
+# With coverage
+pip install pytest-cov
+pytest --cov=internal tests/
+
 # Regenerate protobuf bindings (requires grpcio-tools, not in requirements.txt)
 python -m grpc_tools.protoc -Iproto --python_out=proto --pyi_out=proto --grpc_python_out=proto proto/helper.proto
 
@@ -337,9 +352,14 @@ python -m grpc_tools.protoc -Iproto --python_out=proto --pyi_out=proto --grpc_py
 docker build -t ghcr.io/helpingpeoplenow/helper:latest .
 ```
 
-CI (`.github/workflows/docker.yml`) builds and pushes the Docker image on push to `main`. A second workflow `vector-parity.yml` runs `scripts/test_byte_parity_gate.sh` against the backend's `cmd/hash_fixture` to gate byte-level parity between Go (`BuildFieldTexts`) and Python (`backfill_embeddings.py`).
+CI (`.github/workflows/docker.yml`) runs:
+1. **`test`** — `pytest` (Python 3.12, 128 tests) on every PR and push
+2. **`validate`** — Docker build on every PR (gated by `test`)
+3. **`push`** — Docker build & push on `main` (gated by `test`)
 
-**No unit tests, no lint, no typecheck** — only CI is Docker build/push + parity gate.
+A second workflow `vector-parity.yml` runs `scripts/test_byte_parity_gate.sh` against the backend's `cmd/hash_fixture` to gate byte-level parity between Go (`BuildFieldTexts`) and Python (`backfill_embeddings.py`).
+
+**No lint, no typecheck** — only CI is pytest + Docker build/push + parity gate.
 
 ---
 
@@ -349,8 +369,21 @@ CI (`.github/workflows/docker.yml`) builds and pushes the Docker image on push t
 helper/
 ├── main.py                       # Entry point: load adapters + embedding provider, start gRPC + health server
 ├── Dockerfile                    # Single-stage: python:3.12-slim (PYTHONPATH=/app:/app/proto)
+├── .dockerignore                 # Excludes dev dirs, tests, venvs from build context (R7)
 ├── requirements.txt              # Python dependencies (grpcio, langchain-openai, requests, httpx, prometheus_client, psycopg2-binary)
+├── requirements-dev.txt          # Test-only deps: pytest==8.3, respx==0.22
+├── pytest.ini                    # pytest config (testpaths, warnings)
 ├── VERSION                       # 0.4
+├── tests/
+│   ├── conftest.py               # FakeAdapter stub + fixtures (reset_health_cache, isolated_env)
+│   ├── test_helper_agent.py      # 33 tests: fallback chain, response parsing, deadline/budget
+│   ├── test_health_cache.py      # 16 tests: cached health probe (R2)
+│   ├── test_metrics.py           # 18 tests: auth_errors_total, classify_error (R10)
+│   ├── test_grpc_server.py       # 14 tests: auth interceptor, input cap, config, shutdown (R1/R3/R6/R8/R9)
+│   ├── test_opencode_llm.py      # 8 tests: OpenCode adapter constructor, success, history, errors
+│   ├── test_mistral_llm.py       # 8 tests: Mistral adapter constructor, success, history, errors
+│   ├── test_ollama_llm.py        # 11 tests: Ollama adapter constructor, trailing-slash, success, errors
+│   └── test_embedding_provider.py # 23 tests: embed, embed_batch, health, sha256_hex
 ├── proto/
 │   ├── helper.proto              # Protobuf contract (canonical source)
 │   ├── helper_pb2.py             # Generated protobuf messages

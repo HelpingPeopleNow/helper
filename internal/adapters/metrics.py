@@ -1,8 +1,8 @@
 """
 Prometheus metrics for the helper service.
 
-Exposes counters, histograms, and gauges for gRPC, LLM, and health check
-observability. All metrics are defined as module-level singletons so they
+Exposes counters, histograms, and gauges for gRPC, LLM, health check,
+and auth observability. All metrics are defined as module-level singletons so they
 can be imported and used from any part of the application.
 """
 import time
@@ -66,7 +66,17 @@ health_check_total = Counter(
 
 
 # ---------------------------------------------------------------------------
-# 4. Active requests gauge
+# 4. Auth error metric (R10)
+# ---------------------------------------------------------------------------
+auth_errors_total = Counter(
+    "auth_errors_total",
+    "Total rejected gRPC calls due to auth failure",
+    ["reason"],
+)
+
+
+# ---------------------------------------------------------------------------
+# 5. Active requests gauge
 # ---------------------------------------------------------------------------
 active_requests = Gauge(
     "active_requests",
@@ -75,30 +85,47 @@ active_requests = Gauge(
 
 
 # ---------------------------------------------------------------------------
-# Helper: classify exceptions into error_type labels
+# Helper: classify exceptions into error_type labels (R10)
 # ---------------------------------------------------------------------------
 def classify_error(exc: Exception) -> str:
-    """Return a Prometheus-friendly error_type label for the given exception."""
-    name = type(exc).__name__.lower()
+    """Return a Prometheus-friendly error_type label for the given exception.
+
+    Uses explicit exception-type matching first (R10), then falls back
+    to substring heuristics for third-party/unknown exception classes.
+    """
+    name = type(exc).__name__
+    import requests as _requests
+    import grpc as _grpc
+
+    # Explicit type matches (R10)
+    if isinstance(exc, _requests.exceptions.Timeout):
+        return "timeout"
+    if isinstance(exc, _grpc.RpcError):
+        code = getattr(exc, "code", lambda: None)()
+        if code is not None:
+            mapping = {
+                _grpc.StatusCode.DEADLINE_EXCEEDED: "timeout",
+                _grpc.StatusCode.UNAVAILABLE: "connection_error",
+                _grpc.StatusCode.UNAUTHENTICATED: "auth_error",
+                _grpc.StatusCode.INVALID_ARGUMENT: "invalid_argument",
+                _grpc.StatusCode.RESOURCE_EXHAUSTED: "rate_limited",
+            }
+            return mapping.get(code, "rpc_error")
+
+    # Fallback: substring heuristics for other exception types
     msg = str(exc).lower()
-    if "timeout" in name or "timeout" in msg:
+    n = name.lower()
+    if "timeout" in n or "timeout" in msg:
         return "timeout"
-    if "connection" in name or "connectionerror" in name or "connection" in msg:
+    if "connection" in n or "connection" in msg:
         return "connection_error"
-    if "http" in msg and ("5" in msg[:3] or "4" in msg[:3]):
-        return "http_error"
-    if "json" in name or "jsondecode" in name or "parse" in msg:
+    if "json" in n or "jsondecode" in n or "parse" in msg:
         return "parse_error"
-    # Fallback: check common substrings
-    if "timed out" in msg or "deadline" in msg:
-        return "timeout"
-    if "connect" in msg:
-        return "connection_error"
-    if "status" in msg and ("5" in msg or "4" in msg):
-        return "http_error"
     if "decode" in msg or "expect" in msg:
         return "parse_error"
-    return "http_error"
+    if any(h in msg for h in ("429", "500", "502", "503", "504")):
+        return "http_error"
+    return "unknown"
 
 
 # ---------------------------------------------------------------------------

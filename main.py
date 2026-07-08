@@ -3,13 +3,15 @@ Application entry point — starts gRPC server.
 
 Loads all LLM adapters at startup. The backend selects which one to use
 per-request via the llm_provider gRPC field. Empty = default fallback chain:
-Mistral → OpenCode 0 → OpenCode 1 → OpenCode 2 → Ollama.
+OpenCode 0 → OpenCode 1 → OpenCode 2 → Mistral → Ollama (cheap-first, R5).
 
 Also loads the embedding provider (VECTOR_SEARCH_PLAN §7.4) so the
 server can serve Embed/EmbedBatch RPCs alongside the chat path.
 """
 import logging
 import os
+import signal
+import threading
 
 from internal.adapters.embedding_provider import OllamaEmbeddingProvider
 from internal.adapters.grpc_server import configure_health_handler, serve_grpc, serve_health
@@ -24,12 +26,16 @@ logging.basicConfig(
 )
 logger = logging.getLogger(__name__)
 
+_health_http_server: object = None
+
+
 def require_env(key: str) -> str:
     v = os.getenv(key, "").strip()
     if not v:
         logger.error("FATAL: missing required environment variable: %s", key)
         raise SystemExit(1)
     return v
+
 
 def main():
     logger.info("=== Helper Service Starting ===")
@@ -113,10 +119,26 @@ def main():
     )
 
     health_port = int(os.getenv("HEALTH_PORT", "8084"))
-    serve_health(port=health_port)
+    global _health_http_server
+    _health_http_server = serve_health(port=health_port)
     logger.info("Health HTTP server on :%d", health_port)
 
+    # R9: graceful shutdown on SIGTERM/SIGINT.
+    shutdown_event = threading.Event()
+
+    def _handle_shutdown(signum: int, _frame: object) -> None:
+        logger.warning("Signal %d received — shutting down gracefully (R9)", signum)
+        shutdown_event.set()
+
+    signal.signal(signal.SIGTERM, _handle_shutdown)
+    signal.signal(signal.SIGINT, _handle_shutdown)
+
+    shutdown_event.wait()
+    logger.info("Initiating graceful shutdown (stop_grace=30s)")
+    grpc_server.stop(grace=30)
     grpc_server.wait_for_termination()
+    logger.info("gRPC server stopped — goodbye")
+
 
 if __name__ == "__main__":
     main()

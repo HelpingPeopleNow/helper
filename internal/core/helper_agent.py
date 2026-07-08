@@ -7,6 +7,7 @@ The system prompt is received from the backend via gRPC.
 """
 import json
 import logging
+import os
 import time
 from dataclasses import dataclass
 from internal.adapters.metrics import (
@@ -59,34 +60,45 @@ class HelperAgent:
     per-request via the llm_provider field. Empty = auto fallback chain.
     """
 
-    # Default fallback chain when no explicit provider is set
-    FALLBACK_CHAIN = ["mistral", "opencode0", "opencode1", "opencode2", "ollama"]
+    # R5: cheap-first by default. Premium (Mistral) is promoted only when
+    # the backend explicitly sets llm_provider="mistral". Override via
+    # FALLBACK_CHAIN env (comma-separated) without a code change.
+    FALLBACK_CHAIN = (
+        os.getenv("FALLBACK_CHAIN", "opencode0,opencode1,opencode2,mistral,ollama").split(",")
+    )
+
+    # R4: overall wall-clock budget for an Ask across the whole chain.
+    REQUEST_BUDGET_S = float(os.getenv("REQUEST_BUDGET_S", "45.0"))
 
     def __init__(self, adapters: dict[str, LLMPort]) -> None:
         self._adapters = adapters
         logger.info("HelperAgent: %d adapters loaded", len(adapters))
 
-    def answer(self, question: Question, system_prompt: str, history: tuple[Message, ...] = (), llm_provider: str = "", skip_role_detection: bool = False) -> Answer:
+    def answer(self, question: Question, system_prompt: str, history: tuple[Message, ...] = (), llm_provider: str = "", skip_role_detection: bool = False, deadline_s: float | None = None) -> Answer:
         active_requests.inc()
         try:
-            return self._answer_inner(question, system_prompt, history, llm_provider, skip_role_detection)
+            return self._answer_inner(question, system_prompt, history, llm_provider, skip_role_detection, deadline_s)
         finally:
             active_requests.dec()
 
-    def _answer_inner(self, question: Question, system_prompt: str, history: tuple[Message, ...], llm_provider: str, skip_role_detection: bool) -> Answer:
-        # Build provider chain
+    def _answer_inner(self, question: Question, system_prompt: str, history: tuple[Message, ...], llm_provider: str, skip_role_detection: bool, deadline_s: float | None = None) -> Answer:
+        # R4: compute per-request budget from the tighter of the global budget
+        # and the client gRPC deadline. `deadline_s=0` means "no time left" (break
+        # immediately), so check `is not None` (not truthiness) to avoid the
+        # 0.0-falsey pitfall.
+        budget = min(self.REQUEST_BUDGET_S, deadline_s) if deadline_s is not None else self.REQUEST_BUDGET_S
+        started = time.monotonic()
+
         if llm_provider:
-            # Admin-set provider: try it first, then fall through the chain
             providers_chain = [llm_provider] + [p for p in self.FALLBACK_CHAIN if p != llm_provider]
         else:
-            # Auto mode: use default fallback chain
             providers_chain = self.FALLBACK_CHAIN
 
         if skip_role_detection:
             user_text = question.text
         else:
             user_text = question.text + (
-                "\n\nIMPORTANT — You MUST respond with valid JSON ONLY in this exact format: "
+                "\n\nIMPORTANT -- You MUST respond with valid JSON ONLY in this exact format: "
                 '{"answer": "your response here", "role": "worker"}'
                 ' Choose role="worker" if they offer services, role="client" if they need help, '
                 'or role="" if unclear. Use double quotes only.'
@@ -94,6 +106,12 @@ class HelperAgent:
 
         last_error = None
         for i, provider in enumerate(providers_chain):
+            # R4: stop the chain when the budget is exhausted.
+            elapsed = time.monotonic() - started
+            if elapsed >= budget:
+                logger.warning("Ask budget %.1fs exhausted before provider=%s -- stopping chain (R4)", budget, provider)
+                break
+
             llm = self._adapters.get(provider)
             if not llm:
                 logger.debug("No adapter for provider %r, skipping", provider)
@@ -119,20 +137,11 @@ class HelperAgent:
                 logger.warning("LLM provider %s failed: %s", provider, e)
                 continue
 
-        # All providers failed
         logger.error("All LLM providers failed")
         raise last_error or RuntimeError("No LLM providers available")
 
     def _parse_response(self, raw: str) -> Answer:
-        """Parse the LLM's response into Answer + role.
-
-        First tries to extract JSON-wrapped response {"answer":..., "role":...}
-        (used by main chat for role detection).
-        If JSON parsing fails, returns the raw text with no detected role
-        (worker chat where [FIELDS] blocks are extracted by the backend).
-        """
         text = raw.strip()
-        # Handle markdown-wrapped JSON
         if text.startswith("```"):
             for prefix in ("```json", "```"):
                 if text.startswith(prefix):
@@ -142,7 +151,6 @@ class HelperAgent:
                 text = text[:-3]
             text = text.strip()
 
-        # Try to parse the {…} JSON (may be followed by extra text)
         brace_start = text.find("{")
         if brace_start >= 0:
             depth = 0
@@ -164,7 +172,6 @@ class HelperAgent:
                                 return Answer(text=answer_text, detected_role=role)
                         except json.JSONDecodeError as e:
                             logger.warning("LLM returned malformed JSON error=%s raw_text=%s", str(e), text[:200])
-                        break  # outermost brace closed — stop looking
+                        break
 
-        # Non-JSON response — return raw text (worker chat, etc.)
         return Answer(text=raw)

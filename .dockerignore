@@ -1,5 +1,12 @@
 .git
-.env
-*.env
-.venv
+.gitignore
 __pycache__
+*.pyc
+*.md
+scripts/
+tests/
+.env
+.env.*
+venv/
+.venv/
+*.egg-info/

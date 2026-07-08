@@ -3,14 +3,15 @@ gRPC server adapter for the helper service.
 
 Runs alongside FastAPI on a separate port (50051).
 """
+import hmac
 import http.server
 import json
 import logging
+import os
 import threading
 import time
 from concurrent import futures
-from typing import Callable, Optional
-from urllib.parse import urlparse
+from typing import Optional
 from urllib.request import Request, urlopen
 import grpc
 from grpc import ServicerContext
@@ -20,6 +21,7 @@ from internal.adapters.embedding_provider import (
 )
 from internal.adapters.metrics import (
     active_requests,
+    auth_errors_total,
     classify_error,
     estimate_tokens,
     grpc_request_duration_seconds,
@@ -38,6 +40,37 @@ from proto import helper_pb2, helper_pb2_grpc
 
 logger = logging.getLogger(__name__)
 
+# Max question length in characters (R8): reject oversized prompts
+# before forwarding to any LLM adapter (cost/memory protection).
+MAX_QUESTION_LENGTH = int(os.getenv("MAX_QUESTION_LENGTH", "32000"))
+
+# Maximum input bytes for gRPC messages (R3).
+MAX_MESSAGE_BYTES = int(os.getenv("GRPC_MAX_MESSAGE_BYTES", str(4 * 1024 * 1024)))
+
+
+class _AuthInterceptor(grpc.ServerInterceptor):
+    """R1: require a shared-secret bearer token in call metadata.
+
+    Constant-time compare; no token configured => open in local dev
+    (HELPER_AUTH_TOKEN unset).
+    """
+
+    def __init__(self, token: str) -> None:
+        self._token = token
+        self._deny = grpc.unary_unary_rpc_method_handler(
+            lambda req, ctx: ctx.abort(grpc.StatusCode.UNAUTHENTICATED, "invalid token")
+        )
+
+    def intercept_service(self, continuation, handler_call_details):
+        if not self._token:
+            return continuation(handler_call_details)
+        md = dict(handler_call_details.invocation_metadata or ())
+        presented = md.get("authorization", "").removeprefix("Bearer ").strip()
+        if hmac.compare_digest(presented, self._token):
+            return continuation(handler_call_details)
+        auth_errors_total.labels(reason="bad_token").inc()
+        return self._deny
+
 
 class HelperServicer(helper_pb2_grpc.HelperServiceServicer):
     """Implements the gRPC HelperService protocol."""
@@ -51,6 +84,12 @@ class HelperServicer(helper_pb2_grpc.HelperServiceServicer):
         self._embedding = embedding_provider
 
     def Ask(self, request: helper_pb2.AskRequest, context: ServicerContext) -> helper_pb2.AskResponse:
+        # R8: reject oversized questions before forwarding to any LLM adapter.
+        if len(request.question) > MAX_QUESTION_LENGTH:
+            context.set_code(grpc.StatusCode.INVALID_ARGUMENT)
+            context.set_details(f"question too long: {len(request.question)} > {MAX_QUESTION_LENGTH}")
+            raise RuntimeError(f"question too long: {len(request.question)}")
+
         start = time.monotonic()
         history_len = len(request.history)
         system_prompt = request.system_prompt
@@ -64,12 +103,15 @@ class HelperServicer(helper_pb2_grpc.HelperServiceServicer):
                 Message(role=m.role, content=m.content)
                 for m in request.history
             )
+            # R4: propagate client gRPC deadline to the domain chain budget.
+            deadline_s = context.time_remaining()
             result: Answer = self._assistant.answer(
                 Question(text=request.question),
                 system_prompt=system_prompt,
                 history=history,
                 llm_provider=llm_provider,
                 skip_role_detection=skip_role_detection,
+                deadline_s=deadline_s,
             )
             elapsed_ms = (time.monotonic() - start) * 1000
             logger.info("gRPC Ask done: answer_len=%d role=%s elapsed_ms=%.0f", len(result.text), result.detected_role or "none", elapsed_ms)
@@ -82,8 +124,6 @@ class HelperServicer(helper_pb2_grpc.HelperServiceServicer):
             grpc_requests_total.labels(method="Ask", status="error").inc()
             grpc_request_duration_seconds.labels(method="Ask").observe(time.monotonic() - start)
             raise
-
-    # ── Embedding RPCs (VECTOR_SEARCH_PLAN §7.3) ──────────────────
 
     def Embed(
         self,
@@ -169,8 +209,16 @@ class HelperServicer(helper_pb2_grpc.HelperServiceServicer):
             raise
 
 
+# ── Health check helpers (R2: cached) ──────────────────────────────
+
+_health_cache_lock = threading.Lock()
+_health_cache: dict[str, str] = {}
+_health_cache_detail: dict[str, str] = {}
+_health_cache_ts: float = 0.0
+_HEALTH_CACHE_TTL_S = float(os.getenv("HEALTH_CACHE_TTL_S", "20"))
+
+
 def _check_http_url(url: str, timeout: int = 3) -> tuple[str, str]:
-    """Check if a URL is reachable. Returns (status, detail)."""
     try:
         req = Request(url, method="HEAD")
         with urlopen(req, timeout=timeout) as resp:
@@ -181,7 +229,6 @@ def _check_http_url(url: str, timeout: int = 3) -> tuple[str, str]:
 
 
 def _check_openai_compat(base_url: str, api_key: str, model: str, timeout: int = 5) -> tuple[str, str]:
-    """Lightweight check for OpenAI-compatible API endpoints."""
     if not api_key:
         health_check_total.labels(target="openai_compat", status="fail").inc()
         return "down", "missing api_key"
@@ -204,7 +251,6 @@ def _check_openai_compat(base_url: str, api_key: str, model: str, timeout: int =
 
 
 def _check_ollama(base_url: str, model: str, timeout: int = 5) -> tuple[str, str]:
-    """Check if Ollama is reachable and has the model."""
     if not base_url:
         health_check_total.labels(target="ollama", status="fail").inc()
         return "down", "missing base_url"
@@ -228,11 +274,6 @@ def _check_ollama(base_url: str, model: str, timeout: int = 5) -> tuple[str, str
 
 
 def _check_ollama_embedding(base_url: str, model: str, timeout: int = 5) -> tuple[str, str]:
-    """Embedding-specific Ollama check (VECTOR_SEARCH_PLAN §7.6 / §4.4).
-
-    Verifies that the embedding model is pulled. Optional — like
-    the LLM Ollama check, doesn't block critical status.
-    """
     if not base_url:
         health_check_total.labels(target="ollama_embed", status="fail").inc()
         return "skipped", "no OLLAMA_BASE_URL configured"
@@ -248,18 +289,49 @@ def _check_ollama_embedding(base_url: str, model: str, timeout: int = 5) -> tupl
             health_check_total.labels(target="ollama_embed", status="ok").inc()
             return "ok", f"model {model} available"
         health_check_total.labels(target="ollama_embed", status="fail").inc()
-        return "down", f"model {model} not pulled yet — run ollama pull {model}"
+        return "down", f"model {model} not pulled yet -- run ollama pull {model}"
     except Exception as exc:
         logger.warning("health check ollama_embed url=%s error=%s", base_url, exc)
         health_check_total.labels(target="ollama_embed", status="fail").inc()
         return "down", str(exc)
 
 
-class HealthHandler(http.server.BaseHTTPRequestHandler):
-    """Health check endpoint with dependency checks.
+def _refresh_health_cache(
+    adapter_details: dict[str, dict[str, str]],
+) -> None:
+    """Run all upstream health checks and write results under lock (R2)."""
+    global _health_cache, _health_cache_detail, _health_cache_ts
+    results: dict[str, str] = {}
+    details: dict[str, str] = {}
+    for name, info in adapter_details.items():
+        kind = info.get("kind", "")
+        if kind == "openai_compat":
+            status, detail = _check_openai_compat(
+                info.get("base_url", ""),
+                info.get("api_key", ""),
+                info.get("model", ""),
+            )
+        elif kind == "ollama":
+            status, detail = _check_ollama(
+                info.get("base_url", ""),
+                info.get("model", ""),
+            )
+        elif kind == "embedding":
+            status, detail = _check_ollama_embedding(
+                info.get("base_url", ""),
+                info.get("model", ""),
+            )
+        else:
+            status, detail = "unknown", "unknown kind"
+        results[name] = status
+        details[name] = detail
+    with _health_cache_lock:
+        _health_cache = results
+        _health_cache_detail = details
+        _health_cache_ts = time.monotonic()
 
-    Reports on: gRPC server, LLM adapters, embedding provider.
-    """
+
+class HealthHandler(http.server.BaseHTTPRequestHandler):
     _adapter_names: list[str] = []
     _grpc_server: Optional[grpc.Server] = None
     _adapter_details: dict[str, dict[str, str]] = {}
@@ -267,14 +339,28 @@ class HealthHandler(http.server.BaseHTTPRequestHandler):
     def do_GET(self) -> None:
         if self.path == "/health":
             self._handle_health()
+        elif self.path == "/ready":
+            self._handle_ready()
         elif self.path == "/metrics":
             self._handle_metrics()
         else:
             logger.warning("health unknown_path=%s", self.path)
             self.send_response(404)
             self.end_headers()
+
+    def _handle_ready(self) -> None:
+        """Cheap readiness: gRPC up + at least one adapter OK in last cache."""
+        with _health_cache_lock:
+            healthy = any(v == "ok" for v in _health_cache.values())
+        ready = self._grpc_server is not None and (healthy or not _health_cache)
+        body = json.dumps({"ready": ready}).encode()
+        self.send_response(200 if ready else 503)
+        self.send_header("Content-Type", "application/json")
+        self.send_header("Content-Length", str(len(body)))
+        self.end_headers()
+        self.wfile.write(body)
+
     def _handle_metrics(self) -> None:
-        """Return Prometheus metrics in text format."""
         body = generate_latest()
         self.send_response(200)
         self.send_header("Content-Type", CONTENT_TYPE_LATEST)
@@ -283,6 +369,7 @@ class HealthHandler(http.server.BaseHTTPRequestHandler):
         self.wfile.write(body)
 
     def _handle_health(self) -> None:
+        """Serve health from cache; never calls upstream inline (R2)."""
         status = {"status": "ok", "grpc": "ok", "adapters": "ok"}
 
         if self._grpc_server is not None:
@@ -290,43 +377,20 @@ class HealthHandler(http.server.BaseHTTPRequestHandler):
         else:
             status["grpc"] = "unknown"
 
+        # Read cached results under lock.
+        with _health_cache_lock:
+            cached = dict(_health_cache)
+            cached_detail = dict(_health_cache_detail)
+
         adapter_results: dict[str, str] = {}
         adapter_details: dict[str, str] = {}
-        for name, details in self._adapter_details.items():
-            # Skip Ollama — it's optional/local-only and shouldn't block health.
-            if details.get("kind") == "ollama":
-                adapter_results[name] = "skipped"
-                adapter_details[name] = "optional/local"
-                continue
-            kind = details.get("kind", "")
-            if kind == "openai_compat":
-                check_status, check_detail = _check_openai_compat(
-                    details.get("base_url", ""),
-                    details.get("api_key", ""),
-                    details.get("model", ""),
-                )
-            elif kind == "ollama":
-                check_status, check_detail = _check_ollama(
-                    details.get("base_url", ""),
-                    details.get("model", ""),
-                )
-            else:
-                check_status, check_detail = "unknown", "unknown adapter kind"
-            adapter_results[name] = check_status
-            adapter_details[name] = check_detail
 
-        # Embedding provider (VECTOR_SEARCH_PLAN §7.6)
-        embed_status, embed_detail = _check_ollama_embedding(
-            self._adapter_details.get("embedding", {}).get("base_url", ""),
-            self._adapter_details.get("embedding", {}).get("model", ""),
-        )
-        # "skipped" / "down" both surface but don't downgrade status to degraded
-        # — embedding is optional for the chat path. JSON response includes the
-        # raw status so operators can see.
-        adapter_results["embedding"] = embed_status
-        adapter_details["embedding"] = embed_detail
+        for name, result in cached.items():
+            # R2: skip the inline check entirely — use cached value.
+            adapter_results[name] = result
+            adapter_details[name] = cached_detail.get(name, "")
 
-        status["adapters"] = "ok" if all(v == "ok" for v in adapter_results.values() if v not in ("skipped", "down")) else "degraded"
+        status["adapters"] = "ok" if all(v == "ok" for v in adapter_results.values() if v not in ("skipped",)) else "degraded"
         status["adapter_results"] = adapter_results
         status["adapter_details"] = adapter_details
         status["loaded_adapters"] = self._adapter_names
@@ -353,12 +417,39 @@ def serve_grpc(
     embedding_provider: Optional[EmbeddingProvider] = None,
     port: int = 50051,
 ) -> grpc.Server:
-    """Start the gRPC server in a background thread."""
-    server = grpc.server(futures.ThreadPoolExecutor(max_workers=10))
+    """Start the gRPC server in a background thread.
+
+    R1/R3: supports auth interceptor, bounded workers, concurrent RPC cap,
+    configurable message size, and optional TLS.
+    """
+    max_workers = int(os.getenv("GRPC_MAX_WORKERS", "16"))
+    max_concurrent = int(os.getenv("GRPC_MAX_CONCURRENT_RPCS", "32"))
+    token = os.getenv("HELPER_AUTH_TOKEN", "").strip()
+
+    server = grpc.server(
+        futures.ThreadPoolExecutor(max_workers=max_workers),
+        maximum_concurrent_rpcs=max_concurrent,
+        interceptors=[_AuthInterceptor(token)] if token else [],
+        options=[
+            ("grpc.max_receive_message_length", MAX_MESSAGE_BYTES),
+            ("grpc.max_send_message_length", MAX_MESSAGE_BYTES),
+            ("grpc.keepalive_time_ms", 30000),
+            ("grpc.keepalive_timeout_ms", 10000),
+        ],
+    )
     helper_pb2_grpc.add_HelperServiceServicer_to_server(
         HelperServicer(assistant, embedding_provider=embedding_provider), server,
     )
-    bound = server.add_insecure_port(f"[::]:{port}")
+    cert = os.getenv("GRPC_TLS_CERT_PATH")
+    key = os.getenv("GRPC_TLS_KEY_PATH")
+    if cert and key:
+        with open(cert, "rb") as c, open(key, "rb") as k:
+            creds = grpc.ssl_server_credentials([(k.read(), c.read())])
+        bound = server.add_secure_port(f"[::]:{port}", creds)
+        logger.info("gRPC TLS enabled (cert=%s key=%s)", cert, key)
+    else:
+        logger.warning("gRPC TLS not configured -- using insecure port (dev only)")
+        bound = server.add_insecure_port(f"[::]:{port}")
     logger.info("gRPC server bound on :%d (port_result=%d)", port, bound)
     server.start()
     logger.info("gRPC server listening on :%d", port)
@@ -370,15 +461,32 @@ def configure_health_handler(
     grpc_server: Optional[grpc.Server] = None,
     adapter_details: Optional[dict[str, dict[str, str]]] = None,
 ) -> None:
-    """Set health check dependencies before starting the server."""
+    """Set health check dependencies and start the background refresh loop (R2)."""
     HealthHandler._adapter_names = adapter_names
     HealthHandler._grpc_server = grpc_server
     HealthHandler._adapter_details = adapter_details or {}
+    # Initial cache populate.
+    if adapter_details:
+        _refresh_health_cache(adapter_details)
+    # Background refresh loop.
+    def _background_refresh():
+        while True:
+            time.sleep(_HEALTH_CACHE_TTL_S)
+            try:
+                _refresh_health_cache(adapter_details or {})
+            except Exception:
+                logger.exception("health cache refresh failed")
+    t = threading.Thread(target=_background_refresh, daemon=True)
+    t.start()
+    logger.info("health cache background refresh started (ttl=%.0fs)", _HEALTH_CACHE_TTL_S)
 
 
 def serve_health(port: int = 8084) -> http.server.HTTPServer:
-    """Start a lightweight health HTTP server in a daemon thread."""
-    server = http.server.HTTPServer(("0.0.0.0", port), HealthHandler)
+    """Start a lightweight health HTTP server in a daemon thread.
+
+    R6: uses ThreadingHTTPServer so a slow /health never blocks /metrics scrapes.
+    """
+    server = http.server.ThreadingHTTPServer(("0.0.0.0", port), HealthHandler)
     thread = threading.Thread(target=server.serve_forever, daemon=True)
     thread.start()
     logger.info("health HTTP server on :%d", port)
