@@ -10,7 +10,11 @@ import respx
 
 from internal.adapters.embedding_provider import (
     EXPECTED_DIMENSIONS,
+    BATCH_ITEM_STATUS_SUCCESS,
+    BATCH_ITEM_STATUS_DIM_MISMATCH,
+    BATCH_ITEM_STATUS_FAIL,
     DimensionMismatchError,
+    EmbedBatchResultItem,
     OllamaEmbeddingProvider,
     sha256_hex,
 )
@@ -106,24 +110,72 @@ class TestEmbed:
             p.embed("text")
 
 
+# ── P2-3: per-item batch result; one bad row never voids the batch ─────
+
+
 class TestEmbedBatch:
     @respx.mock
-    def test_sequential_batch(self) -> None:
+    def test_sequential_batch_all_success(self) -> None:
         route = respx.post("http://local:11434/api/embeddings").respond(
             200, json={"embedding": _FAKE_VEC}
         )
         p = OllamaEmbeddingProvider(base_url="http://local:11434")
         results = p.embed_batch(["a", "b", "c"])
         assert len(results) == 3
-        assert all(r == _FAKE_VEC for r in results)
+        assert all(isinstance(r, EmbedBatchResultItem) for r in results)
+        assert all(r.status == BATCH_ITEM_STATUS_SUCCESS for r in results)
+        assert all(r.embedding == _FAKE_VEC for r in results)
         assert route.call_count == 3
 
     @respx.mock
-    def test_batch_stops_on_first_error(self) -> None:
-        respx.post("http://local:11434/api/embeddings").respond(503)
+    def test_batch_continues_past_one_failure(self) -> None:
+        """"HTTP 500 for index 0; indices 1+ succeed.
+
+        This is the P2-3 invariant: one bad row never voids the batch.
+        Each item carries an explicit status — the caller decides what to
+        skip (backfill script upserts successes, logs skips).
+        """
+        # respx routes match by exact body; with three different texts,
+        # the easiest way is to set a sequence of responses via side_effect.
+        import itertools
+        call_count = {"n": 0}
+
+        def _route(request):
+            call_count["n"] += 1
+            return httpx.Response(500 if call_count["n"] == 1 else 200, json={"embedding": _FAKE_VEC})
+
+        respx.post("http://local:11434/api/embeddings").mock(side_effect=_route)
         p = OllamaEmbeddingProvider(base_url="http://local:11434")
-        with pytest.raises(RuntimeError, match="HTTP 503"):
-            p.embed_batch(["a", "b", "c"])
+        results = p.embed_batch(["a", "b", "c"])
+        assert len(results) == 3
+        assert results[0].status == BATCH_ITEM_STATUS_FAIL
+        assert results[0].embedding is None
+        assert "HTTP 500" in results[0].error
+        assert results[1].status == BATCH_ITEM_STATUS_SUCCESS
+        assert results[2].status == BATCH_ITEM_STATUS_SUCCESS
+
+    @respx.mock
+    def test_batch_per_item_dim_mismatch_status(self) -> None:
+        """A row that returns wrong dim gets `status=dim_mismatch`, not raise.
+
+        Mocks two sequential responses with different dimensions; the
+        embed_batch iterator must NOT bubble an exception (per P2-3) and
+        must mark the bad row distinctly so the caller can skip-persist.
+        """
+        bad_vec = [0.1, 0.2, 0.3]
+        bodies = [{"embedding": bad_vec}, {"embedding": _FAKE_VEC}]
+        # respx.route + side_effect list-of-dicts: respond from a side queue.
+        respx.post("http://local:11434/api/embeddings").mock(
+            side_effect=[httpx.Response(200, json=b) for b in bodies]
+        )
+        p = OllamaEmbeddingProvider(base_url="http://local:11434")
+        results = p.embed_batch(["bad", "good"])
+        assert len(results) == 2
+        assert results[0].status == BATCH_ITEM_STATUS_DIM_MISMATCH
+        assert results[0].embedding is None
+        assert "768" in results[0].error
+        assert results[1].status == BATCH_ITEM_STATUS_SUCCESS
+        assert results[1].embedding == _FAKE_VEC
 
     @respx.mock
     def test_empty_batch(self) -> None:
@@ -196,7 +248,12 @@ class TestHealth:
             )
             status, detail = p.health()
         assert status == "down"
-        assert "refused" in detail
+        # P2-5: detail is the sanitized sentinel "upstream unreachable" — the
+        # raw exception text ("refused") is logged at WARNING for ops but NOT
+        # surfaced on /health JSON, so an unauthenticated caller can't scrape
+        # provider-specific error strings. (Pre-P2-5 behavior was to leak
+        # `str(exc)` here.)
+        assert "unreachable" in detail
 
     def test_down_when_ollama_unreachable(self, isolated_env) -> None:
         """Real HTTP call to a non-existent server — verifies the error fallback."""

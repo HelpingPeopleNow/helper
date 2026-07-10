@@ -72,6 +72,8 @@ class HelperServiceServicer:
         """EmbedBatch returns embeddings for a list of texts in one round-trip.
         Used by the backfill script in helper/scripts/backfill_embeddings.py and
         by any bulk path that needs more than one embedding at a time.
+        Per-item status (success | dim_mismatch | fail) so a bad row doesn't
+        void the whole batch (P2-3).
         """
         context.set_code(grpc.StatusCode.UNIMPLEMENTED)
         context.set_details('Method not implemented!')

@@ -62,8 +62,24 @@ class EmbedBatchRequest(_message.Message):
     model: str
     def __init__(self, texts: _Optional[_Iterable[str]] = ..., model: _Optional[str] = ...) -> None: ...
 
+class EmbedBatchItem(_message.Message):
+    __slots__ = ("index", "status", "embedding", "model", "dimensions", "error")
+    INDEX_FIELD_NUMBER: _ClassVar[int]
+    STATUS_FIELD_NUMBER: _ClassVar[int]
+    EMBEDDING_FIELD_NUMBER: _ClassVar[int]
+    MODEL_FIELD_NUMBER: _ClassVar[int]
+    DIMENSIONS_FIELD_NUMBER: _ClassVar[int]
+    ERROR_FIELD_NUMBER: _ClassVar[int]
+    index: int
+    status: str
+    embedding: _containers.RepeatedScalarFieldContainer[float]
+    model: str
+    dimensions: int
+    error: str
+    def __init__(self, index: _Optional[int] = ..., status: _Optional[str] = ..., embedding: _Optional[_Iterable[float]] = ..., model: _Optional[str] = ..., dimensions: _Optional[int] = ..., error: _Optional[str] = ...) -> None: ...
+
 class EmbedBatchResponse(_message.Message):
-    __slots__ = ("embeddings",)
-    EMBEDDINGS_FIELD_NUMBER: _ClassVar[int]
-    embeddings: _containers.RepeatedCompositeFieldContainer[EmbedResponse]
-    def __init__(self, embeddings: _Optional[_Iterable[_Union[EmbedResponse, _Mapping]]] = ...) -> None: ...
+    __slots__ = ("items",)
+    ITEMS_FIELD_NUMBER: _ClassVar[int]
+    items: _containers.RepeatedCompositeFieldContainer[EmbedBatchItem]
+    def __init__(self, items: _Optional[_Iterable[_Union[EmbedBatchItem, _Mapping]]] = ...) -> None: ...

@@ -4,20 +4,34 @@ Domain core: the HelperAgent aggregate.
 Pure business logic. No framework, no I/O, no LLM, no DB.
 Depends only on the port protocol (LLM interface), not on adapters.
 The system prompt is received from the backend via gRPC.
+
+P1-5: after each successful adapter call, the agent records token usage
+into `llm_tokens_total{provider,direction}`. The agent first reads the
+adapter's `last_usage` attribute (set by the adapter from LangChain
+usage_metadata or Ollama prompt_eval_count); if either direction is
+missing, it falls back to tiktoken estimates from the assembled message
+list (input) and the response text (output). This gives us real
+billing-accurate counts where the vendor cooperates, and a much
+better-than-chars/4 estimate everywhere else.
 """
 import json
 import logging
 import os
 import time
 from dataclasses import dataclass
+
 from internal.adapters.metrics import (
     active_requests,
     classify_error,
-    estimate_tokens,
     llm_errors_total,
     llm_request_duration_seconds,
     llm_requests_total,
-    llm_tokens_total,
+)
+from internal.adapters.token_counting import (
+    TokenUsage,
+    count_messages_tokens,
+    count_text_tokens,
+    record_usage,
 )
 from internal.ports.llm import LLMPort, Message
 
@@ -104,7 +118,18 @@ class HelperAgent:
                 'or role="" if unclear. Use double quotes only.'
             )
 
-        last_error = None
+        # P1-5: assemble the input token estimate once per request. Used as
+        # fallback when an adapter's `last_usage` lacks input_tokens. Per
+        # provider in the loop we still re-derive to keep callers flexible
+        # (some sanity-check providers return different content).
+        history_parts = [m.content for m in history]
+        fallback_input_parts = [system_prompt] + history_parts + [user_text]
+
+        # P1-3 (R3): track that all of these providers failed, so the final
+        # exception reflects the last adapter that actually raised (rather
+        # than silently masking context).
+        last_error: Exception | None = None
+
         for i, provider in enumerate(providers_chain):
             # R4: stop the chain when the budget is exhausted.
             elapsed = time.monotonic() - started
@@ -128,7 +153,22 @@ class HelperAgent:
                     history=history,
                 )
                 llm_request_duration_seconds.labels(provider=provider, mode="worker_intake").observe(time.monotonic() - llm_start)
-                llm_tokens_total.labels(provider=provider, direction="output").inc(estimate_tokens(raw))
+
+                # P1-5: capture the adapter-populated usage, fall back to
+                # tiktoken estimates for any missing direction.
+                usage = getattr(llm, "last_usage", None) or TokenUsage()
+                if usage.input_tokens is None:
+                    usage = TokenUsage(
+                        input_tokens=count_messages_tokens(fallback_input_parts),
+                        output_tokens=usage.output_tokens,
+                    )
+                if usage.output_tokens is None:
+                    usage = TokenUsage(
+                        input_tokens=usage.input_tokens,
+                        output_tokens=count_text_tokens(raw),
+                    )
+                record_usage(provider, usage)
+
                 return self._parse_response(raw)
             except Exception as e:
                 llm_request_duration_seconds.labels(provider=provider, mode="worker_intake").observe(time.monotonic() - llm_start)

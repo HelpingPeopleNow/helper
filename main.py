@@ -7,23 +7,28 @@ OpenCode 0 → OpenCode 1 → OpenCode 2 → Mistral → Ollama (cheap-first, R5
 
 Also loads the embedding provider (VECTOR_SEARCH_PLAN §7.4) so the
 server can serve Embed/EmbedBatch RPCs alongside the chat path.
+
+The JSON logging handler + trace_id filter are installed by
+`internal.adapters.grpc_server` at import time. We just import that module
+here so the side effect runs deterministically before any of our loggers
+fire.
 """
 import logging
 import os
 import signal
 import threading
 
+from internal.adapters.grpc_server import (  # noqa: F401 (side-effect import)
+    configure_health_handler,
+    serve_grpc,
+    serve_health,
+)
 from internal.adapters.embedding_provider import OllamaEmbeddingProvider
-from internal.adapters.grpc_server import configure_health_handler, serve_grpc, serve_health
 from internal.adapters.mistral_llm import MistralLLMAdapter
 from internal.adapters.opencode_llm import OpenCodeLLMAdapter
 from internal.adapters.ollama_llm import OllamaLLMAdapter
 from internal.core.helper_agent import HelperAgent
 
-logging.basicConfig(
-    level=logging.INFO,
-    format="%(asctime)s %(levelname)s %(name)s %(message)s",
-)
 logger = logging.getLogger(__name__)
 
 _health_http_server: object = None

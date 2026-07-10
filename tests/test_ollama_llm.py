@@ -7,6 +7,7 @@ from unittest.mock import MagicMock, patch
 import pytest
 
 from internal.adapters.ollama_llm import OllamaLLMAdapter
+from internal.adapters.token_counting import TokenUsage
 from internal.ports.llm import Message
 
 
@@ -26,8 +27,10 @@ class TestConstructor:
         assert adapter._base_url == "http://explicit:11434"
 
     def test_defaults_when_env_unset(self, isolated_env) -> None:
+        # P3-2: adapter default is the canonical production model
+        # (qwen2.5:1.5b, matching main.py + infra/docker-compose.yml).
         adapter = OllamaLLMAdapter()
-        assert adapter._model == "qwen3.5:0.8b"
+        assert adapter._model == "qwen2.5:1.5b"
         assert adapter._base_url == ""
 
     def test_base_url_strips_trailing_slash(self, isolated_env) -> None:
@@ -97,3 +100,35 @@ class TestComplete:
         with patch("requests.post", side_effect=RuntimeError("Connection refused")):
             with pytest.raises(RuntimeError, match="Connection refused"):
                 adapter.complete("sys", "user")
+
+
+# ── P1-5: real token usage via Ollama prompt_eval_count / eval_count ──
+
+
+class TestTokenUsage:
+    def test_last_usage_populated_from_eval_count(self) -> None:
+        """Ollama /api/generate returns real token counts when stream=false."""
+        adapter = OllamaLLMAdapter(model="m", base_url="http://local:11434")
+        mock_response = MagicMock()
+        mock_response.raise_for_status.return_value = None
+        mock_response.json.return_value = {
+            "response": "ok",
+            "prompt_eval_count": 42,
+            "eval_count": 7,
+        }
+        with patch("requests.post", return_value=mock_response):
+            adapter.complete("sys", "user")
+        assert adapter.last_usage is not None
+        assert adapter.last_usage.input_tokens == 42
+        assert adapter.last_usage.output_tokens == 7
+
+    def test_last_usage_none_on_failure(self) -> None:
+        """A failed call must reset last_usage so we don't leak prior data."""
+        adapter = OllamaLLMAdapter(model="m", base_url="http://local:11434")
+        # Pre-pollute
+        adapter.last_usage = TokenUsage(input_tokens=999, output_tokens=999)
+        with patch("requests.post", side_effect=RuntimeError("boom")):
+            with pytest.raises(RuntimeError):
+                adapter.complete("sys", "user")
+        # Reset on entry to complete(); failure must keep it None.
+        assert adapter.last_usage is None

@@ -220,7 +220,7 @@ Requires `MISTRAL_API_KEY`. When unset, the adapter is skipped — `main.py` log
 
 - Connects to a local Ollama instance at `OLLAMA_BASE_URL` (default `http://localhost:11434`).
 - Uses raw `requests` (no langchain) — full prompt (system+history+user) is concatenated into a single string and POSTed to `/api/generate` with `stream=False, think=False`.
-- Model: env `OLLAMA_MODEL` (default in `OllamaLLMAdapter.__init__` is `qwen3.5:0.8b`, but `main.py` always passes `OLLAMA_MODEL` explicitly so the runtime default is whatever compose sets — `qwen2.5:1.5b` in production per `infra/docker-compose.yml`).
+- Model: env `OLLAMA_MODEL` (default `qwen2.5:1.5b` in both `OllamaLLMAdapter.__init__` and `infra/docker-compose.yml`; env overrides at runtime).
 
 ### Embedding provider
 

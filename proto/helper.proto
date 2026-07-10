@@ -12,6 +12,8 @@ service HelperService {
   // EmbedBatch returns embeddings for a list of texts in one round-trip.
   // Used by the backfill script in helper/scripts/backfill_embeddings.py and
   // by any bulk path that needs more than one embedding at a time.
+  // Per-item status (success | dim_mismatch | fail) so a bad row doesn't
+  // void the whole batch (P2-3).
   rpc EmbedBatch(EmbedBatchRequest) returns (EmbedBatchResponse);
 }
 
@@ -68,7 +70,20 @@ message EmbedBatchRequest {
   string model = 2;
 }
 
+// Per-item result with explicit status (P2-3). One bad row no longer
+// voids the entire batch — callers iterate items and decide what to do
+// with each (e.g. backfill script skips failed items and upserts successes).
+message EmbedBatchItem {
+  int32 index = 1;             // position in the original request.texts
+  string status = 2;           // "success" | "dim_mismatch" | "fail"
+  repeated float embedding = 3; // empty unless status == "success"
+  string model = 4;             // echoed model name (matches EmbedResponse)
+  int32 dimensions = 5;         // 0 unless status == "success"
+  string error = 6;             // diagnostic detail; status != "success" implies set
+}
+
 message EmbedBatchResponse {
-  // One embedding per input text, in the same order as request.texts.
-  repeated EmbedResponse embeddings = 1;
+  // One item per input text, in the same order as request.texts.
+  // `items[i]` corresponds to `request.texts[i]` (i == item.index).
+  repeated EmbedBatchItem items = 1;
 }

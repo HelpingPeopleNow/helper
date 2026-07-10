@@ -12,6 +12,13 @@ in chunks of 16 and atomically upserts into `worker_embeddings`.
 Idempotent: pre-loads existing `(user_id, field_name) -> text_hash` map and
 only embeds rows whose content hash changed (or were missing).
 
+P2-3: the helper's `EmbedBatch` response is now
+`EmbedBatchResponse { repeated EmbedBatchItem items }` with per-item
+`status` ("success" | "dim_mismatch" | "fail"). This script iterates
+`resp.items`, skips failed rows, and upserts the successes. One bad row
+in a chunk no longer voids the whole chunk — the next chunk proceeds and
+the failed text is logged for ops to act on.
+
 Usage:
     DB_HOST=localhost DB_USER=postgres DB_PASSWORD=postgres \\
     DB_NAME=helpingpeoplenow HELPER_GRPC_ADDR=localhost:50051 \\
@@ -39,7 +46,6 @@ import logging
 import os
 import sys
 import time
-from typing import Optional
 
 logger = logging.getLogger("backfill_embeddings")
 logging.basicConfig(
@@ -53,6 +59,12 @@ logging.basicConfig(
 DEFAULT_EMBEDDING_MODEL = "granite-embedding:278m"
 EXPECTED_DIMENSIONS = 768
 BATCH_SIZE = 16
+
+# P2-3 status values that must match `internal/adapters/embedding_provider.py`
+# and `proto/helper.proto::EmbedBatchItem.status`.
+BATCH_STATUS_SUCCESS = "success"
+BATCH_STATUS_DIM_MISMATCH = "dim_mismatch"
+BATCH_STATUS_FAIL = "fail"
 
 # Order matches BuildFieldTexts(). Embeddings are computed per field so
 # iteration order doesn't affect the produced vectors — this constant is
@@ -324,10 +336,19 @@ def run_backfill(batch_size: int = BATCH_SIZE, dry_run: bool = False) -> dict:
                     conn.rollback()
                     continue
 
+                # P2-3: walk `resp.items` (one per input text). Only upsert
+                # successes; log + count skips for failures.
                 rows_to_upsert = []
-                for item, sub_resp in zip(batch, resp.embeddings):
+                for item, sub_item in zip(batch, resp.items):
                     user_id, fname, _text, h = item
-                    vec = list(sub_resp.embedding)
+                    if sub_item.status != BATCH_STATUS_SUCCESS:
+                        logger.warning(
+                            "dim/embed fail for %s/%s: status=%s error=%s — skipping",
+                            user_id, fname, sub_item.status, sub_item.error,
+                        )
+                        embed_err += 1
+                        continue
+                    vec = list(sub_item.embedding)
                     if len(vec) != EXPECTED_DIMENSIONS:
                         logger.warning(
                             "dim mismatch for %s/%s: got %d, expected %d — skipping",
@@ -337,7 +358,7 @@ def run_backfill(batch_size: int = BATCH_SIZE, dry_run: bool = False) -> dict:
                         continue
                     rows_to_upsert.append(
                         (user_id, fname, vec_to_sql_literal(vec),
-                         sub_resp.model or model_name, h)
+                         sub_item.model or model_name, h)
                     )
 
                 if not rows_to_upsert:

@@ -24,7 +24,7 @@ _sym_db = _symbol_database.Default()
 
 
 
-DESCRIPTOR = _descriptor_pool.Default().AddSerializedFile(b'\n\x0chelper.proto\x12\x06helper\"(\n\x07Message\x12\x0c\n\x04role\x18\x01 \x01(\t\x12\x0f\n\x07\x63ontent\x18\x02 \x01(\t\"\x8a\x01\n\nAskRequest\x12\x10\n\x08question\x18\x01 \x01(\t\x12 \n\x07history\x18\x02 \x03(\x0b\x32\x0f.helper.Message\x12\x15\n\rsystem_prompt\x18\x03 \x01(\t\x12\x14\n\x0cllm_provider\x18\x04 \x01(\t\x12\x1b\n\x13skip_role_detection\x18\x05 \x01(\x08\"4\n\x0b\x41skResponse\x12\x0e\n\x06\x61nswer\x18\x01 \x01(\t\x12\x15\n\rdetected_role\x18\x02 \x01(\t\"+\n\x0c\x45mbedRequest\x12\x0c\n\x04text\x18\x01 \x01(\t\x12\r\n\x05model\x18\x02 \x01(\t\"E\n\rEmbedResponse\x12\x11\n\tembedding\x18\x01 \x03(\x02\x12\r\n\x05model\x18\x02 \x01(\t\x12\x12\n\ndimensions\x18\x03 \x01(\x05\"1\n\x11\x45mbedBatchRequest\x12\r\n\x05texts\x18\x01 \x03(\t\x12\r\n\x05model\x18\x02 \x01(\t\"?\n\x12\x45mbedBatchResponse\x12)\n\nembeddings\x18\x01 \x03(\x0b\x32\x15.helper.EmbedResponse2\xba\x01\n\rHelperService\x12.\n\x03\x41sk\x12\x12.helper.AskRequest\x1a\x13.helper.AskResponse\x12\x34\n\x05\x45mbed\x12\x14.helper.EmbedRequest\x1a\x15.helper.EmbedResponse\x12\x43\n\nEmbedBatch\x12\x19.helper.EmbedBatchRequest\x1a\x1a.helper.EmbedBatchResponseB2Z0github.com/HelpingPeopleNow/backend/proto/helperb\x06proto3')
+DESCRIPTOR = _descriptor_pool.Default().AddSerializedFile(b'\n\x0chelper.proto\x12\x06helper\"(\n\x07Message\x12\x0c\n\x04role\x18\x01 \x01(\t\x12\x0f\n\x07\x63ontent\x18\x02 \x01(\t\"\x8a\x01\n\nAskRequest\x12\x10\n\x08question\x18\x01 \x01(\t\x12 \n\x07history\x18\x02 \x03(\x0b\x32\x0f.helper.Message\x12\x15\n\rsystem_prompt\x18\x03 \x01(\t\x12\x14\n\x0cllm_provider\x18\x04 \x01(\t\x12\x1b\n\x13skip_role_detection\x18\x05 \x01(\x08\"4\n\x0b\x41skResponse\x12\x0e\n\x06\x61nswer\x18\x01 \x01(\t\x12\x15\n\rdetected_role\x18\x02 \x01(\t\"+\n\x0c\x45mbedRequest\x12\x0c\n\x04text\x18\x01 \x01(\t\x12\r\n\x05model\x18\x02 \x01(\t\"E\n\rEmbedResponse\x12\x11\n\tembedding\x18\x01 \x03(\x02\x12\r\n\x05model\x18\x02 \x01(\t\x12\x12\n\ndimensions\x18\x03 \x01(\x05\"1\n\x11\x45mbedBatchRequest\x12\r\n\x05texts\x18\x01 \x03(\t\x12\r\n\x05model\x18\x02 \x01(\t\"t\n\x0e\x45mbedBatchItem\x12\r\n\x05index\x18\x01 \x01(\x05\x12\x0e\n\x06status\x18\x02 \x01(\t\x12\x11\n\tembedding\x18\x03 \x03(\x02\x12\r\n\x05model\x18\x04 \x01(\t\x12\x12\n\ndimensions\x18\x05 \x01(\x05\x12\r\n\x05\x65rror\x18\x06 \x01(\t\";\n\x12\x45mbedBatchResponse\x12%\n\x05items\x18\x01 \x03(\x0b\x32\x16.helper.EmbedBatchItem2\xba\x01\n\rHelperService\x12.\n\x03\x41sk\x12\x12.helper.AskRequest\x1a\x13.helper.AskResponse\x12\x34\n\x05\x45mbed\x12\x14.helper.EmbedRequest\x1a\x15.helper.EmbedResponse\x12\x43\n\nEmbedBatch\x12\x19.helper.EmbedBatchRequest\x1a\x1a.helper.EmbedBatchResponseB2Z0github.com/HelpingPeopleNow/backend/proto/helperb\x06proto3')
 
 _globals = globals()
 _builder.BuildMessageAndEnumDescriptors(DESCRIPTOR, _globals)
@@ -44,8 +44,10 @@ if not _descriptor._USE_C_DESCRIPTORS:
   _globals['_EMBEDRESPONSE']._serialized_end=375
   _globals['_EMBEDBATCHREQUEST']._serialized_start=377
   _globals['_EMBEDBATCHREQUEST']._serialized_end=426
-  _globals['_EMBEDBATCHRESPONSE']._serialized_start=428
-  _globals['_EMBEDBATCHRESPONSE']._serialized_end=491
-  _globals['_HELPERSERVICE']._serialized_start=494
-  _globals['_HELPERSERVICE']._serialized_end=680
+  _globals['_EMBEDBATCHITEM']._serialized_start=428
+  _globals['_EMBEDBATCHITEM']._serialized_end=544
+  _globals['_EMBEDBATCHRESPONSE']._serialized_start=546
+  _globals['_EMBEDBATCHRESPONSE']._serialized_end=605
+  _globals['_HELPERSERVICE']._serialized_start=608
+  _globals['_HELPERSERVICE']._serialized_end=794
 # @@protoc_insertion_point(module_scope)
