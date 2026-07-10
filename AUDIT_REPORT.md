@@ -115,9 +115,9 @@ flowchart TB
 
 ### P3 — Hygiene / polish
 - **P3-1 (R10)** Replace `classify_error` string heuristics with explicit exception-type mapping; add `auth_errors_total` so README matches reality.
-- **P3-2** Remove dead `EXPOSE 8085`; reconcile `OllamaLLMAdapter` default `qwen3.5:0.8b` vs `qwen2.5:1.5b`.
+- **P3-2 ✅ FIXED — 2026-07-10** `OllamaLLMAdapter.__init__` default aligned to `qwen2.5:1.5b` (the canonical production model, matches `main.py` + `infra/docker-compose.yml`). Stale 'unreachable default' notes in `AGENTS.md` / `README.md` cleaned. `tests/test_ollama_llm.py::TestConstructor::test_defaults_when_env_unset` updated. Dead `EXPOSE 8085` was already removed earlier.
 - **P3-3** Consolidate HTTP clients (`requests` vs `httpx`) on one library.
-- **P3-4** Handle langchain `response.content` possibly being a list of content blocks (guard `len()`).
+- **P3-4 ✅ FIXED — 2026-07-10** Added `langchain_content_to_text(content)` in `internal/adapters/token_counting.py`. Accepts `str | list[str] | list[dict] | None` and returns plain text; drops non-text content blocks (`tool_use`, `image`, `function_call`) so the domain parser stays safe. Both `MistralLLMAdapter.complete` and `OpenCodeLLMAdapter.complete` use it for both `len()` and `return`. New tests in `test_opencode_llm.py::TestContentBlocks`, `test_mistral_llm.py::TestContentBlocks`, and `test_mistral_llm.py::TestLangchainContentNormalizer`.
 
 ---
 
