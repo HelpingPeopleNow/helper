@@ -337,7 +337,7 @@ python main.py
 # Smoke test — server should bind 50051 (gRPC) + 8084 (HTTP sidecar)
 python main.py
 
-# Run tests (128 tests, requires requirements-dev.txt)
+# Run tests (~165 test functions, requires requirements-dev.txt)
 pip install -r requirements-dev.txt
 pytest -v tests/
 
