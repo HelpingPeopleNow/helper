@@ -15,8 +15,8 @@ from pathlib import Path
 from unittest.mock import MagicMock
 
 import grpc
+import httpx
 import pytest
-import requests
 
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
 
@@ -53,11 +53,11 @@ class TestAuthErrorsCounter:
 class TestClassifyErrorExplicitTypes:
     """Test #104-111: explicit isinstance-based classification."""
 
-    def test_requests_timeout(self) -> None:
-        assert classify_error(requests.exceptions.Timeout()) == "timeout"
+    def test_httpx_timeout(self) -> None:
+        assert classify_error(httpx.TimeoutException("timeout")) == "timeout"
 
-    def test_requests_connection_error(self) -> None:
-        assert classify_error(requests.exceptions.ConnectionError()) == "connection_error"
+    def test_httpx_connect_error(self) -> None:
+        assert classify_error(httpx.ConnectError("connection refused")) == "connection_error"
 
     def test_grpc_deadline_exceeded(self) -> None:
         err = _fake_grpc_error(grpc.StatusCode.DEADLINE_EXCEEDED)

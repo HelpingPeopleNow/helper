@@ -400,8 +400,8 @@ def _check_openai_compat(base_url: str, api_key: str, model: str, timeout: int =
         health_check_total.labels(target="openai_compat", status="fail").inc()
         return "down", "missing api_key"
     try:
-        import requests
-        resp = requests.get(
+        import httpx
+        resp = httpx.get(
             f"{base_url.rstrip('/')}/models",
             headers={"Authorization": f"Bearer {api_key}"},
             timeout=timeout,
@@ -428,8 +428,8 @@ def _check_ollama(base_url: str, model: str, timeout: int = 5) -> tuple[str, str
         health_check_total.labels(target="ollama", status="fail").inc()
         return "down", "missing base_url"
     try:
-        import requests
-        resp = requests.get(f"{base_url.rstrip('/')}/api/tags", timeout=timeout)
+        import httpx
+        resp = httpx.get(f"{base_url.rstrip('/')}/api/tags", timeout=timeout)
         if resp.status_code != 200:
             logger.warning(
                 "ollama health non-200 url=%s status=%s body=%s",
@@ -456,8 +456,8 @@ def _check_ollama_embedding(base_url: str, model: str, timeout: int = 5) -> tupl
         health_check_total.labels(target="ollama_embed", status="fail").inc()
         return "skipped", "no OLLAMA_BASE_URL configured"
     try:
-        import requests
-        resp = requests.get(f"{base_url.rstrip('/')}/api/tags", timeout=timeout)
+        import httpx
+        resp = httpx.get(f"{base_url.rstrip('/')}/api/tags", timeout=timeout)
         if resp.status_code != 200:
             logger.warning(
                 "ollama embedding health non-200 url=%s status=%s body=%s",

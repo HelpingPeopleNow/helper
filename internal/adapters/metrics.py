@@ -94,11 +94,11 @@ def classify_error(exc: Exception) -> str:
     to substring heuristics for third-party/unknown exception classes.
     """
     name = type(exc).__name__
-    import requests as _requests
+    import httpx as _httpx
     import grpc as _grpc
 
     # Explicit type matches (R10)
-    if isinstance(exc, _requests.exceptions.Timeout):
+    if isinstance(exc, _httpx.TimeoutException):
         return "timeout"
     if isinstance(exc, _grpc.RpcError):
         code = getattr(exc, "code", lambda: None)()

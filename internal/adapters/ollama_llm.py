@@ -11,7 +11,7 @@ omits those fields.
 """
 import logging
 import os
-import requests
+import httpx
 
 from internal.adapters.token_counting import (
     TokenUsage,
@@ -56,7 +56,7 @@ class OllamaLLMAdapter:
         logger.info("Ollama call: model=%s prompt_chars=%d", self._model, len(full_prompt))
 
         try:
-            resp = requests.post(url, json=payload, stream=False, timeout=60)
+            resp = httpx.post(url, json=payload, timeout=60)
             resp.raise_for_status()
             data = resp.json()
         except Exception:

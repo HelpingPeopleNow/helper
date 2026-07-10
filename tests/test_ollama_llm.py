@@ -1,4 +1,4 @@
-"""Tests for the Ollama LLM adapter (raw requests.post)."""
+"""Tests for the Ollama LLM adapter (httpx.post)."""
 from __future__ import annotations
 
 import os
@@ -44,7 +44,7 @@ class TestComplete:
         mock_response = MagicMock()
         mock_response.raise_for_status.return_value = None
         mock_response.json.return_value = {"response": "hello world"}
-        with patch("requests.post", return_value=mock_response) as mock_post:
+        with patch("httpx.post", return_value=mock_response) as mock_post:
             result = adapter.complete("system prompt", "user message")
         assert result == "hello world"
         mock_post.assert_called_once()
@@ -59,7 +59,7 @@ class TestComplete:
         mock_response = MagicMock()
         mock_response.raise_for_status.return_value = None
         mock_response.json.return_value = {"response": "ans"}
-        with patch("requests.post", return_value=mock_response) as mock_post:
+        with patch("httpx.post", return_value=mock_response) as mock_post:
             history = (Message("user", "hi"), Message("assistant", "hey"))
             result = adapter.complete("sys", "current", history=history)
         assert result == "ans"
@@ -74,7 +74,7 @@ class TestComplete:
         mock_response = MagicMock()
         mock_response.raise_for_status.return_value = None
         mock_response.json.return_value = {"response": "ans"}
-        with patch("requests.post", return_value=mock_response):
+        with patch("httpx.post", return_value=mock_response):
             result = adapter.complete("sys", "user")
         assert result == "ans"
 
@@ -83,7 +83,7 @@ class TestComplete:
         mock_response = MagicMock()
         mock_response.raise_for_status.return_value = None
         mock_response.json.return_value = {}
-        with patch("requests.post", return_value=mock_response):
+        with patch("httpx.post", return_value=mock_response):
             result = adapter.complete("sys", "user")
         assert result == ""
 
@@ -91,13 +91,13 @@ class TestComplete:
         adapter = OllamaLLMAdapter(model="m", base_url="http://local:11434")
         mock_response = MagicMock()
         mock_response.raise_for_status.side_effect = RuntimeError("500 error")
-        with patch("requests.post", return_value=mock_response):
+        with patch("httpx.post", return_value=mock_response):
             with pytest.raises(RuntimeError, match="500 error"):
                 adapter.complete("sys", "user")
 
     def test_raises_on_connection_error(self) -> None:
         adapter = OllamaLLMAdapter(model="m", base_url="http://local:11434")
-        with patch("requests.post", side_effect=RuntimeError("Connection refused")):
+        with patch("httpx.post", side_effect=RuntimeError("Connection refused")):
             with pytest.raises(RuntimeError, match="Connection refused"):
                 adapter.complete("sys", "user")
 
@@ -116,7 +116,7 @@ class TestTokenUsage:
             "prompt_eval_count": 42,
             "eval_count": 7,
         }
-        with patch("requests.post", return_value=mock_response):
+        with patch("httpx.post", return_value=mock_response):
             adapter.complete("sys", "user")
         assert adapter.last_usage is not None
         assert adapter.last_usage.input_tokens == 42
@@ -127,7 +127,7 @@ class TestTokenUsage:
         adapter = OllamaLLMAdapter(model="m", base_url="http://local:11434")
         # Pre-pollute
         adapter.last_usage = TokenUsage(input_tokens=999, output_tokens=999)
-        with patch("requests.post", side_effect=RuntimeError("boom")):
+        with patch("httpx.post", side_effect=RuntimeError("boom")):
             with pytest.raises(RuntimeError):
                 adapter.complete("sys", "user")
         # Reset on entry to complete(); failure must keep it None.
