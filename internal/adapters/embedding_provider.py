@@ -111,12 +111,17 @@ class OllamaEmbeddingProvider(EmbeddingProvider):
 
     def embed(self, text: str) -> list[float]:
         vec = self._post_embeddings(text)
-        if len(vec) != EXPECTED_DIMENSIONS:
-            raise DimensionMismatchError(
-                f"Embedding returned dim={len(vec)}, expected "
-                f"{EXPECTED_DIMENSIONS} for model={self._model}. "
-                "Refusing to return — do not persist mismatched-dim vectors."
-            )
+        try:
+            if len(vec) != EXPECTED_DIMENSIONS:
+                raise DimensionMismatchError(
+                    f"Embedding returned dim={len(vec)}, expected "
+                    f"{EXPECTED_DIMENSIONS} for model={self._model}. "
+                    "Refusing to return — do not persist mismatched-dim vectors."
+                )
+        except DimensionMismatchError as e:
+            logger.warning("embedding: dimension mismatch: %s", e)
+            raise
+        logger.info("embedding: success, dim=%d", len(vec))
         return vec
 
     def embed_batch(self, texts: list[str]) -> list[list[float]]:
@@ -145,6 +150,7 @@ class OllamaEmbeddingProvider(EmbeddingProvider):
                 # Ollama tags often return tagless names with ":latest" suffix
                 # stripped. Match either prefix.
                 if any(n == self._model or n == f"{self._model}:latest" for n in names):
+                    logger.info("health: embedding provider OK")
                     return "ok", f"model {self._model} available"
                 return "down", f"model {self._model} not pulled"
         except Exception as exc:

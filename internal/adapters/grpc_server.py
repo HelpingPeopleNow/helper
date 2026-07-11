@@ -68,6 +68,7 @@ class _AuthInterceptor(grpc.ServerInterceptor):
         presented = md.get("authorization", "").removeprefix("Bearer ").strip()
         if hmac.compare_digest(presented, self._token):
             return continuation(handler_call_details)
+        logger.warning("RPC rejected: bad token, method=%s", context.method())
         auth_errors_total.labels(reason="bad_token").inc()
         return self._deny
 
@@ -86,6 +87,7 @@ class HelperServicer(helper_pb2_grpc.HelperServiceServicer):
     def Ask(self, request: helper_pb2.AskRequest, context: ServicerContext) -> helper_pb2.AskResponse:
         # R8: reject oversized questions before forwarding to any LLM adapter.
         if len(request.question) > MAX_QUESTION_LENGTH:
+            logger.warning("Ask rejected: question too long (%d chars)", len(request.question))
             context.set_code(grpc.StatusCode.INVALID_ARGUMENT)
             context.set_details(f"question too long: {len(request.question)} > {MAX_QUESTION_LENGTH}")
             raise RuntimeError(f"question too long: {len(request.question)}")
@@ -136,6 +138,7 @@ class HelperServicer(helper_pb2_grpc.HelperServiceServicer):
         logger.info("gRPC Embed: text_len=%d model=%s", text_len, requested_model or "(default)")
 
         if self._embedding is None:
+            logger.warning("Embed rejected: no embedding provider configured")
             grpc_requests_total.labels(method="Embed", status="error").inc()
             context.set_code(grpc.StatusCode.UNAVAILABLE)
             context.set_details("embedding provider not configured")
@@ -174,6 +177,7 @@ class HelperServicer(helper_pb2_grpc.HelperServiceServicer):
         logger.info("gRPC EmbedBatch: n=%d model=%s", n_texts, requested_model or "(default)")
 
         if self._embedding is None:
+            logger.warning("EmbedBatch rejected: no embedding provider configured")
             grpc_requests_total.labels(method="EmbedBatch", status="error").inc()
             context.set_code(grpc.StatusCode.UNAVAILABLE)
             context.set_details("embedding provider not configured")
@@ -231,6 +235,7 @@ def _check_http_url(url: str, timeout: int = 3) -> tuple[str, str]:
 def _check_openai_compat(base_url: str, api_key: str, model: str, timeout: int = 5) -> tuple[str, str]:
     if not api_key:
         health_check_total.labels(target="openai_compat", status="fail").inc()
+        logger.warning("health: OpenAI-compat down: %s", "missing api_key")
         return "down", "missing api_key"
     try:
         import requests
@@ -243,22 +248,26 @@ def _check_openai_compat(base_url: str, api_key: str, model: str, timeout: int =
             health_check_total.labels(target="openai_compat", status="ok").inc()
             return "ok", f"HTTP {resp.status_code}"
         health_check_total.labels(target="openai_compat", status="fail").inc()
+        logger.warning("health: OpenAI-compat down: HTTP %s: %s", resp.status_code, resp.text[:100])
         return "down", f"HTTP {resp.status_code}: {resp.text[:100]}"
     except Exception as exc:
         logger.warning("health check openai_compat url=%s error=%s", base_url, exc)
         health_check_total.labels(target="openai_compat", status="fail").inc()
+        logger.warning("health: OpenAI-compat down: %s", exc)
         return "down", str(exc)
 
 
 def _check_ollama(base_url: str, model: str, timeout: int = 5) -> tuple[str, str]:
     if not base_url:
         health_check_total.labels(target="ollama", status="fail").inc()
+        logger.warning("health: Ollama down: %s", "missing base_url")
         return "down", "missing base_url"
     try:
         import requests
         resp = requests.get(f"{base_url.rstrip('/')}/api/tags", timeout=timeout)
         if resp.status_code != 200:
             health_check_total.labels(target="ollama", status="fail").inc()
+            logger.warning("health: Ollama down: HTTP %s: %s", resp.status_code, resp.text[:100])
             return "down", f"HTTP {resp.status_code}: {resp.text[:100]}"
         data = resp.json()
         models = data.get("models", [])
@@ -266,16 +275,19 @@ def _check_ollama(base_url: str, model: str, timeout: int = 5) -> tuple[str, str
             health_check_total.labels(target="ollama", status="ok").inc()
             return "ok", f"model {model} found"
         health_check_total.labels(target="ollama", status="fail").inc()
+        logger.warning("health: Ollama down: %s", f"model {model} not found")
         return "down", f"model {model} not found"
     except Exception as exc:
         logger.warning("health check ollama url=%s error=%s", base_url, exc)
         health_check_total.labels(target="ollama", status="fail").inc()
+        logger.warning("health: Ollama down: %s", exc)
         return "down", str(exc)
 
 
 def _check_ollama_embedding(base_url: str, model: str, timeout: int = 5) -> tuple[str, str]:
     if not base_url:
         health_check_total.labels(target="ollama_embed", status="fail").inc()
+        logger.warning("health: Ollama embedding skipped: %s", "no OLLAMA_BASE_URL configured")
         return "skipped", "no OLLAMA_BASE_URL configured"
     try:
         import requests
@@ -322,6 +334,7 @@ def _refresh_health_cache(
                 info.get("model", ""),
             )
         else:
+            logger.warning("health: unknown adapter kind=%s", kind)
             status, detail = "unknown", "unknown kind"
         results[name] = status
         details[name] = detail
