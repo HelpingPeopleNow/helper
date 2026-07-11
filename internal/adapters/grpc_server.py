@@ -68,7 +68,7 @@ class _AuthInterceptor(grpc.ServerInterceptor):
         presented = md.get("authorization", "").removeprefix("Bearer ").strip()
         if hmac.compare_digest(presented, self._token):
             return continuation(handler_call_details)
-        logger.warning("RPC rejected: bad token, method=%s", context.method())
+        logger.warning("RPC rejected: bad token, method=%s", handler_call_details.method())
         auth_errors_total.labels(reason="bad_token").inc()
         return self._deny
 
