@@ -86,3 +86,15 @@ jobs:
           labels: ${{ steps.meta.outputs.labels }}
           cache-from: type=gha
           cache-to: type=gha,mode=max
+
+  # ──────────────────────────────────────────────
+  # Step 3: Deploy to Hermes (self-hosted runner)
+  # ──────────────────────────────────────────────
+  deploy:
+    name: Deploy to Hermes
+    runs-on: self-hosted
+    needs: [push]
+    if: (github.event_name == 'push' && github.ref == 'refs/heads/main') || github.event_name == 'workflow_dispatch'
+    steps:
+      - name: Deploy
+        run: /home/ec2-user/infra/scripts/deploy-service.sh helper ${{ github.sha }}
