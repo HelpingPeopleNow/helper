@@ -74,7 +74,7 @@ jobs:
           images: ${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}
           tags: |
             type=raw,value=latest,enable={{is_default_branch}}
-            type=sha
+            type=sha,prefix=,enable-short=false
             type=ref,event=branch
 
       - name: Build and push
