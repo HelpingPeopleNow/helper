@@ -228,7 +228,7 @@ Used by `Embed` and `EmbedBatch` gRPC methods (vector search backend path). Sing
 
 | Provider | Model (default) | Base URL | Purpose |
 |----------|-----------------|----------|---------|
-| `OllamaEmbeddingProvider` | `granite-embedding:278m` (env `EMBEDDING_MODEL`) | `OLLAMA_BASE_URL` | Produces 768-dim vectors for `worker_embeddings` (VECTOR_SEARCH_PLAN §7.4). |
+| `OllamaEmbeddingProvider` | `granite-embedding:278m` (env `EMBEDDING_MODEL`) | `OLLAMA_BASE_URL` | Produces 768-dim vectors for `worker_embeddings`. |
 
 The proto definitions for `Embed` / `EmbedBatch` are in `proto/helper.proto`; both methods report dimensions and the actual model used. Dimension mismatch (≠768) raises `DimensionMismatchError` → gRPC `FAILED_PRECONDITION` so backend never persists bad data.
 

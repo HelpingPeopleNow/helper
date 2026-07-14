@@ -69,7 +69,7 @@ Optional:
 | `MISTRAL_MODEL` | `mistral-large-latest` | Mistral model |
 | `MISTRAL_BASE_URL` | `https://api.mistral.ai/v1` | Mistral API |
 | `OLLAMA_BASE_URL` | `http://localhost:11434` | Ollama endpoint (LLM AND embedding share this daemon) |
-| `OLLAMA_MODEL` | `qwen2.5:1.5b` | Ollama chat model (fallback chat when cloud providers are down; per VECTOR_SEARCH_PLAN §17) |
+| `OLLAMA_MODEL` | `qwen2.5:1.5b` | Ollama chat model (fallback chat when cloud providers are down) |
 | `EMBEDDING_MODEL` | `granite-embedding:278m` | Ollama embedding model (vector search) |
 | `HELPER_AUTH_TOKEN` | — | gRPC auth token (Bearer); empty = no auth (R1) |
 | `GRPC_MAX_CONCURRENT_RPCS` | `32` | Server `maximum_concurrent_rpcs` (R3) |
