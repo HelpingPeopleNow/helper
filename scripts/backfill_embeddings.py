@@ -48,6 +48,11 @@ logging.basicConfig(
     stream=sys.stderr,
 )
 
+# Directory this script lives in — used to locate the committed
+# professions.json mirror and the proto stubs.
+_HERE = os.path.dirname(os.path.abspath(__file__))
+
+
 # ── Constants ──────────────────────────────────────────────────────────
 # MUST stay in lock-step with backend/internal/core/worker_embeddings.go.
 DEFAULT_EMBEDDING_MODEL = "granite-embedding:278m"
@@ -79,39 +84,45 @@ WORKER_COLUMNS = (
 
 
 # ── Field composition (parity with Go) ────────────────────────────────
+# Loaded from professions.json (committed sibling of this script), which is
+# the byte-for-byte mirror of backend/internal/core/professions.json. Both
+# files are kept identical by the byte-parity CI gate
+# (test_byte_parity_gate.sh), so runtime queries (Go) and batch backfill
+# (this script) canonicalize professions to the same strings. The map keys
+# are pre-lowercased, matching Go's NormalizeProfession lookup.
+_PROFESSIONS_JSON_PATH = os.path.join(_HERE, "professions.json")
+
+
+def _load_profession_aliases() -> dict:
+    """Load the alias→canonical map from professions.json.
+
+    Falls back to an empty dict if the file is missing (e.g. the script is
+    run from an unexpected location) so normalization degrades to a
+    pass-through rather than crashing. The CI parity gate guarantees the
+    file is present and matches the backend copy."""
+    try:
+        with open(_PROFESSIONS_JSON_PATH, "r", encoding="utf-8") as fh:
+            data = json.load(fh)
+        if isinstance(data, dict):
+            return data
+    except (OSError, ValueError) as exc:
+        logger.warning("normalize_profession: could not load %s: %s",
+                       _PROFESSIONS_JSON_PATH, exc)
+    return {}
+
+
+PROFESSION_ALIASES = _load_profession_aliases()
+
+
 def normalize_profession(p: str) -> str:
-    """Byte-identical mirror of backend/internal/core/worker_embeddings.go
-    ::normalizeProfessionForEmbedding. If you add a case in Go, add it here
-    in the same order — ordering doesn't matter for switch statements but
-    matters for change-detection diffs in code review."""
-    if p in (
-        "electricista", "Electricista", "electrician", "Electrician",
-    ):
-        return "Electrician"
-    if p in (
-        "fontanero", "Fontanero", "plomero", "Plomero", "plumber", "Plumber",
-    ):
-        return "Plumber"
-    if p in (
-        "limpieza", "Limpieza", "cleaner", "Cleaner", "cleaning", "Cleaning",
-    ):
-        return "Cleaner"
-    if p in ("manitas", "Manitas", "handyman", "Handyman"):
-        return "Handyman"
-    if p in ("carpintero", "Carpintero", "carpenter", "Carpenter"):
-        return "Carpenter"
-    if p in ("pintor", "Pintor", "painter", "Painter"):
-        return "Painter"
-    if p in (
-        "jardinero", "Jardinero", "landscaper", "Landscaper",
-        "gardener", "Gardener",
-    ):
-        return "Landscaper"
-    if p in ("tejado", "Tejado", "roofer", "Roofer"):
-        return "Roofer"
-    if p in ("clima", "Clima", "hvac", "HVAC"):
-        return "HVAC Technician"
-    return p
+    """Mirror of backend/internal/core/professions.go::NormalizeProfession.
+
+    Case-insensitive, whitespace-trimmed lookup against PROFESSION_ALIASES
+    (loaded from professions.json). Unknown values pass through unchanged,
+    exactly like the Go side."""
+    if not p:
+        return p
+    return PROFESSION_ALIASES.get(p.strip().lower(), p)
 
 
 def _join_json_array(json_str: str) -> str:
@@ -246,7 +257,6 @@ def open_grpc(addr: str):
     return helper_pb2_grpc.HelperServiceStub(channel), channel
 
 
-_HERE = os.path.dirname(os.path.abspath(__file__))
 
 
 def run_backfill(batch_size: int = BATCH_SIZE, dry_run: bool = False) -> dict:

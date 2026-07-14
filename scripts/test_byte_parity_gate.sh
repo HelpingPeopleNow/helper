@@ -166,19 +166,70 @@ else
   fi
 fi
 
+# ── Scenario C: profession alias maps must be identical (P-A follow-up) ──
+echo
+echo "=== Scenario C: backend/internal/core/professions.json"
+echo "                 vs helper/scripts/professions.json ==="
+echo "    (must PASS — the two must be byte-for-byte equal)"
+BACKEND_JSON="$BACKEND_DIR/internal/core/professions.json"
+HELPER_JSON="$HELPER_ROOT/scripts/professions.json"
+
+scenario_c_ok=0
+if [[ ! -f "$BACKEND_JSON" ]]; then
+  echo "  ✗ Scenario C: $BACKEND_JSON not found"
+elif [[ ! -f "$HELPER_JSON" ]]; then
+  echo "  ✗ Scenario C: $HELPER_JSON not found"
+else
+  if python3 - "$BACKEND_JSON" "$HELPER_JSON" <<'EOF'
+import json, sys
+
+def load(path):
+    with open(path, "r", encoding="utf-8") as fh:
+        return json.load(fh)
+
+try:
+    a = load(sys.argv[1])
+    b = load(sys.argv[2])
+except (OSError, ValueError) as exc:
+    print(f"  ✗ Scenario C: failed to parse JSON: {exc}")
+    sys.exit(1)
+
+if a == b:
+    print(f"  ✓ Scenario C: profession maps identical ({len(a)} aliases)")
+    sys.exit(0)
+
+# Report the precise divergence for easy triage.
+only_a = {k: v for k, v in a.items() if k not in b}
+only_b = {k: v for k, v in b.items() if k not in a}
+diff_vals = {k: (a[k], b[k]) for k in a if k in b and a[k] != b[k]}
+print("  ✗ Scenario C: profession maps DIVERGE")
+if only_a:
+    print(f"    only in backend: {only_a}")
+if only_b:
+    print(f"    only in helper:  {only_b}")
+if diff_vals:
+    print(f"    value mismatches: {diff_vals}")
+sys.exit(1)
+EOF
+  then
+    scenario_c_ok=1
+  fi
+fi
+
 # ── Verdict ──────────────────────────────────────────────────────────────
 echo
 echo "=== result ==="
-if (( scenario_a_ok == 1 )) && (( scenario_b_ok == 1 )); then
+if (( scenario_a_ok == 1 )) && (( scenario_b_ok == 1 )) && (( scenario_c_ok == 1 )); then
   cat <<EOF
 
 ALL SCENARIOS PASS
   ✓ Scenario A  current parity holds (no false positive)
   ✓ Scenario B  gate catches drift on multi-byte text (bio line)
+  ✓ Scenario C  backend + helper profession maps are identical
 
 The byte-parity CI gate is verified to behave as expected.
 EOF
   exit 0
 fi
-echo "FAILED: A=$scenario_a_ok B=$scenario_b_ok"
+echo "FAILED: A=$scenario_a_ok B=$scenario_b_ok C=$scenario_c_ok"
 exit 1
