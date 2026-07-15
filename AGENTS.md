@@ -4,7 +4,7 @@ Stateless Python gRPC server that processes chat requests through LLM adapters a
 
 ## Key facts
 
-- **128 pytest tests, CI-gated** — CI (`docker.yml`) runs `pytest` before Docker build on every PR; the `test` job gates `validate` and `push`. Overall coverage **77%**; domain core at 97%, LLM adapters at 100%, metrics at 95%, embedding provider at 92%. Also runs `vector-parity.yml` (byte-parity gate against backend `cmd/hash_fixture`). No lint, no typecheck. On push to `main`, a `Deploy to Hermes` job runs on the self-hosted runner to deploy the new image automatically.
+- **141 pytest tests, CI-gated** — CI (`docker.yml`) runs `pytest` before Docker build on every PR; the `test` job gates `validate` and `push`. Overall coverage **77%**; domain core at 97%, LLM adapters at 100%, metrics at 95%, embedding provider at 92%. Also runs `vector-parity.yml` (byte-parity gate against backend `cmd/hash_fixture`). No lint, no typecheck. On push to `main`, a `Deploy to Hermes` job runs on the self-hosted runner to deploy the new image automatically.
 - **OpenCode adapters use `langchain_openai.ChatOpenAI`** — `opencode0` (`big-pickle`), `opencode1` (`deepseek-v4-flash-free`), and `opencode2` (`mimo-v2.5-free`) all go through the OpenAI-compatible API at `opencode.ai/zen/v1`. Model names are **hardcoded in `main.py`**, not env-driven (env `LLM_MODEL` only feeds the adapter's fallback when the model arg is omitted — current code always passes it explicitly).
 - **Mistral adapter uses `langchain_openai.ChatOpenAI`** — Mistral's API is OpenAI-compatible; requires `MISTRAL_API_KEY`. The adapter is **only registered when `MISTRAL_API_KEY` is set** (`main.py` checks the env var and logs `"MISTRAL_API_KEY not set; skipping Mistral adapter"` otherwise).
 - **Ollama adapter uses raw `requests`** — no langchain; full prompt (system+history+user) is concatenated into a single string and POSTed to `/api/generate` with `stream=False, think=False`. Production default model `qwen2.5:1.5b` (set in `main.py` from `OLLAMA_MODEL`; `infra/docker-compose.yml` mirrors this). Note: `OllamaLLMAdapter.__init__` also has its own default of `qwen3.5:0.8b`, but it is unreachable because `main.py` always passes `OLLAMA_MODEL` explicitly.
@@ -46,11 +46,13 @@ No `PYTHONPATH` needed when running from the project root. The Dockerfile sets `
 
 ```bash
 pip install -r requirements-dev.txt
-pytest -v tests/               # 128 tests
+pytest -v tests/               # 141 tests
 pytest --cov=internal tests/   # coverage report
 ```
 
-Test files live in `helper/tests/`. Eight files covering: domain core (33), metrics (18), health cache (16), gRPC server (14), OpenCode adapter (8), Mistral adapter (8), Ollama adapter (11), embedding provider (23). Run from `helper/` directory.
+Test files live in `helper/tests/`. Nine files covering: domain core (33), metrics (18), health cache (16), gRPC server (14), OpenCode adapter (7), Mistral adapter (7), Ollama adapter (10), embedding provider (23), main (13). Run from `helper/` directory.
+
+Drift guard: `./scripts/check-test-count.sh` in CI fails with exit 1 (= per-file breakdown on stderr) if the count above drifts from `helper/tests/*.py`. Wire into `helper/.github/workflows/docker.yml` next to the existing pytest step so a PR-build breaks before any image push.
 
 ## Env vars
 
