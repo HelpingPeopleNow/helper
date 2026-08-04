@@ -4,3 +4,9 @@ __pycache__/
 venv/
 .venv/
 .coverage
+
+# Test / type-check / lint cache directories
+.pytest_cache/
+htmlcov/
+.mypy_cache/
+.ruff_cache/
