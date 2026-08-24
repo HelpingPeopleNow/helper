@@ -1,9 +1,16 @@
 __pycache__/
 *.pyc
-.env
 venv/
 .venv/
 .coverage
+
+# Environment files — the live env file is `.env` (never tracked); only `*.example` templates are tracked
+.env
+.env.*
+*.env
+secrets/
+!.env.example
+!.env.*.example
 
 # Test / type-check / lint cache directories
 .pytest_cache/
