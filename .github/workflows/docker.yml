@@ -97,6 +97,10 @@ jobs:
     if: (github.event_name == 'push' && github.ref == 'refs/heads/main') || github.event_name == 'workflow_dispatch'
     steps:
       - name: Pull latest code
-        run: git -C /home/ec2-user/helper pull --ff-only origin main
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          git -C /home/ec2-user/helper fetch --no-tags "https://x-access-token:${GH_TOKEN}@github.com/HelpingPeopleNow/helper.git" main
+          git -C /home/ec2-user/helper merge --ff-only FETCH_HEAD
       - name: Deploy
         run: /home/ec2-user/infra/scripts/deploy-service.sh helper ${{ github.sha }}
