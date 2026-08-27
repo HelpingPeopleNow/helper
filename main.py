@@ -87,6 +87,43 @@ def main():
         }
     else:
         logger.warning("MISTRAL_API_KEY not set; skipping Mistral adapter")
+
+    # GROQ adapter (zero-cost cloud primary, OpenAI-compatible).
+    # Skipped if GROQ_API_KEY is unset. Default model tested clean on this key.
+    groq_key = os.getenv("GROQ_API_KEY", "").strip()
+    if groq_key:
+        groq_model = os.getenv("GROQ_MODEL", "openai/gpt-oss-20b")
+        groq_base = os.getenv("GROQ_BASE_URL", "https://api.groq.com/openai/v1")
+        adapters["groq"] = OpenCodeLLMAdapter(
+            model=groq_model, base_url=groq_base, api_key=groq_key,
+        )
+        adapter_details["groq"] = {
+            "kind": "openai_compat",
+            "base_url": groq_base,
+            "api_key": groq_key,
+            "model": groq_model,
+        }
+    else:
+        logger.warning("GROQ_API_KEY not set; skipping Groq adapter")
+
+    # OPENROUTER adapter (100+ models, one key, OpenAI-compatible).
+    # Skipped if OPENROUTER_API_KEY is unset.
+    or_key = os.getenv("OPENROUTER_API_KEY", "").strip()
+    if or_key:
+        or_model = os.getenv("OPENROUTER_MODEL", "meta-llama/llama-3.1-8b-instruct")
+        or_base = os.getenv("OPENROUTER_BASE_URL", "https://openrouter.ai/api/v1")
+        adapters["openrouter"] = OpenCodeLLMAdapter(
+            model=or_model, base_url=or_base, api_key=or_key,
+        )
+        adapter_details["openrouter"] = {
+            "kind": "openai_compat",
+            "base_url": or_base,
+            "api_key": or_key,
+            "model": or_model,
+        }
+    else:
+        logger.warning("OPENROUTER_API_KEY not set; skipping OpenRouter adapter")
+
     logger.info("Loaded LLM adapters: %s", list(adapters.keys()))
 
     # VECTOR_SEARCH_PLAN §7.4: embedding provider.

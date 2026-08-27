@@ -60,11 +60,12 @@ class HelperAgent:
     per-request via the llm_provider field. Empty = auto fallback chain.
     """
 
-    # R5: cheap-first by default. Premium (Mistral) is promoted only when
-    # the backend explicitly sets llm_provider="mistral". Override via
-    # FALLBACK_CHAIN env (comma-separated) without a code change.
+    # R5: cloud-first by default (Groq + OpenRouter are zero-cost primaries),
+    # then the existing OpenCode/Mistral chain, with local Ollama as the
+    # zero-key final fallback. Override via FALLBACK_CHAIN env (comma-separated)
+    # without a code change.
     FALLBACK_CHAIN = (
-        os.getenv("FALLBACK_CHAIN", "opencode0,opencode1,opencode2,mistral,ollama").split(",")
+        os.getenv("FALLBACK_CHAIN", "groq,openrouter,opencode0,opencode1,opencode2,mistral,ollama").split(",")
     )
 
     # R4: overall wall-clock budget for an Ask across the whole chain.
