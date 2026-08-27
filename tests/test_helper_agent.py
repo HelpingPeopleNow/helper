@@ -28,9 +28,10 @@ from internal.core.helper_agent import Answer, HelperAgent, Question
 
 class TestFallbackChainOrder:
     def test_default_chain_is_cheap_first(self) -> None:
-        """R5: Mistral (premium) is no longer first. OpenCode leads."""
+        """R5: cloud-first by default — Groq leads, Ollama (local) is last."""
         chain = list(HelperAgent.FALLBACK_CHAIN)
-        assert chain[0] == "opencode0"
+        assert chain[0] == "groq"
+        assert "openrouter" in chain
         assert "mistral" in chain
         assert chain.index("mistral") > 0
         assert chain[-1] == "ollama"
