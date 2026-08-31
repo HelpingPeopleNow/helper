@@ -77,6 +77,7 @@ Optional:
 | `GRPC_MAX_CONCURRENT_RPCS` | `32` | Server `maximum_concurrent_rpcs` (R3) |
 | `GRPC_MAX_WORKERS` | `16` | Thread pool `max_workers` for gRPC (R6) |
 | `HEALTH_CACHE_TTL_S` | `20` | Health cache TTL in seconds (R2) |
+| `HEALTH_DEEP_PROBE_INTERVAL_S` | `60` | Interval between synthetic 1-token `Ask()` deep-probe sweeps per adapter (OBSERVABILITY_AUDIT_REPORT.md §3.2); separate cache lane/interval from `HEALTH_CACHE_TTL_S` so it never runs inline on a `/health` scrape |
 | `MAX_QUESTION_LENGTH` | `32000` | Max question chars; longer → `INVALID_ARGUMENT` (R8) |
 | `REQUEST_BUDGET_S` | `45.0` | Per-request LLM budget in seconds (R4) |
 | `FALLBACK_CHAIN` | `opencode0,opencode1,opencode2,mistral,ollama` | Comma-separated fallback order (R5) |

@@ -27,6 +27,7 @@ from internal.adapters.metrics import (
     grpc_request_duration_seconds,
     grpc_requests_total,
     health_check_total,
+    helper_deep_probe_success,
     llm_errors_total,
     llm_request_duration_seconds,
     llm_requests_total,
@@ -35,7 +36,7 @@ from internal.adapters.metrics import (
     CONTENT_TYPE_LATEST,
 )
 from internal.core.helper_agent import Answer, HelperAgent, Question
-from internal.ports.llm import Message
+from internal.ports.llm import LLMPort, Message
 from proto import helper_pb2, helper_pb2_grpc
 
 logger = logging.getLogger(__name__)
@@ -308,6 +309,58 @@ def _check_ollama_embedding(base_url: str, model: str, timeout: int = 5) -> tupl
         return "down", str(exc)
 
 
+# ── Deep health probe (OBSERVABILITY_AUDIT_REPORT.md §3.2) ─────────────
+#
+# The checks above (_check_openai_compat, _check_ollama) only hit cheap
+# metadata endpoints (/models, /api/tags). A Cloudflare WAF rule that
+# fingerprints/blocks POST-heavy chat-completion traffic while leaving GET
+# metadata endpoints open would defeat them entirely (this is what happened
+# during the incident this mechanism was designed to catch). This probe
+# instead performs a real, cheap (1-token) completion call per adapter, on
+# its own longer-interval cache lane so it never runs on every /health scrape.
+_DEEP_PROBE_PROMPT = "Reply with only the single word OK."
+_DEEP_PROBE_USER = "ping"
+_HEALTH_DEEP_PROBE_INTERVAL_S = float(os.getenv("HEALTH_DEEP_PROBE_INTERVAL_S", "60"))
+
+_deep_probe_lock = threading.Lock()
+_deep_probe_results: dict[str, bool] = {}
+
+
+def _run_deep_probe(adapters: dict[str, "LLMPort"]) -> dict[str, bool]:
+    """Run a synthetic 1-token completion against every registered chat
+    adapter and record pass/fail into helper_deep_probe_success{provider}.
+
+    Ollama is skipped when OLLAMA_BASE_URL is unset -- mirrors the
+    "optional/local" treatment already applied to Ollama in
+    _check_ollama_embedding (host-side dependency, not always present).
+    """
+    results: dict[str, bool] = {}
+    for name, adapter in adapters.items():
+        if name == "ollama" and not os.getenv("OLLAMA_BASE_URL", "").strip():
+            continue
+        try:
+            adapter.complete(system_prompt=_DEEP_PROBE_PROMPT, user=_DEEP_PROBE_USER)
+            results[name] = True
+            helper_deep_probe_success.labels(provider=name).set(1)
+        except Exception as exc:
+            logger.warning("deep probe failed provider=%s error=%s", name, exc)
+            results[name] = False
+            helper_deep_probe_success.labels(provider=name).set(0)
+    with _deep_probe_lock:
+        _deep_probe_results.clear()
+        _deep_probe_results.update(results)
+    return results
+
+
+def _deep_probe_loop(adapters: dict[str, "LLMPort"]) -> None:
+    while True:
+        time.sleep(_HEALTH_DEEP_PROBE_INTERVAL_S)
+        try:
+            _run_deep_probe(adapters)
+        except Exception:
+            logger.exception("deep probe loop iteration failed")
+
+
 def _refresh_health_cache(
     adapter_details: dict[str, dict[str, str]],
 ) -> None:
@@ -408,6 +461,20 @@ class HealthHandler(http.server.BaseHTTPRequestHandler):
         status["adapter_details"] = adapter_details
         status["loaded_adapters"] = self._adapter_names
 
+        # OBSERVABILITY_AUDIT_REPORT.md §3.2 — surface the deep-probe layer
+        # alongside the shallow adapter_results so a glance at /health shows
+        # both "metadata endpoint reachable" and "real inference path works".
+        # Read-only from cache; the background _deep_probe_loop is the only
+        # writer (never runs inline on a scrape, same R2 pattern as above).
+        with _deep_probe_lock:
+            deep_probe_results = dict(_deep_probe_results)
+        status["deep_probe_results"] = {
+            name: "ok" if ok else "down" for name, ok in deep_probe_results.items()
+        }
+        status["deep_probe"] = (
+            "ok" if all(deep_probe_results.values()) else "degraded"
+        ) if deep_probe_results else "unknown"
+
         has_any_healthy_adapter = any(v == "ok" for v in adapter_results.values())
         critical_ok = status["grpc"] == "ok" and has_any_healthy_adapter
 
@@ -473,8 +540,14 @@ def configure_health_handler(
     adapter_names: list[str],
     grpc_server: Optional[grpc.Server] = None,
     adapter_details: Optional[dict[str, dict[str, str]]] = None,
+    llm_adapters: Optional[dict[str, "LLMPort"]] = None,
 ) -> None:
-    """Set health check dependencies and start the background refresh loop (R2)."""
+    """Set health check dependencies and start the background refresh loop (R2).
+
+    llm_adapters (OBSERVABILITY_AUDIT_REPORT.md §3.2) — when provided, also
+    starts the deep-probe background loop (separate cache lane, separate
+    interval from the shallow adapter_details checks above).
+    """
     HealthHandler._adapter_names = adapter_names
     HealthHandler._grpc_server = grpc_server
     HealthHandler._adapter_details = adapter_details or {}
@@ -492,6 +565,14 @@ def configure_health_handler(
     t = threading.Thread(target=_background_refresh, daemon=True)
     t.start()
     logger.info("health cache background refresh started (ttl=%.0fs)", _HEALTH_CACHE_TTL_S)
+
+    if llm_adapters:
+        dt = threading.Thread(target=_deep_probe_loop, args=(llm_adapters,), daemon=True)
+        dt.start()
+        logger.info(
+            "deep probe background loop started (interval=%.0fs, adapters=%s)",
+            _HEALTH_DEEP_PROBE_INTERVAL_S, list(llm_adapters.keys()),
+        )
 
 
 def serve_health(port: int = 8084) -> http.server.HTTPServer:

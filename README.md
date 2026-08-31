@@ -185,7 +185,7 @@ A lightweight HTTP server runs alongside the gRPC service on a separate port, us
 
 | Endpoint | Method | Response |
 |----------|--------|----------|
-| `/health` | GET | JSON. `200 → status: ok` if gRPC server is up and at least one LLM adapter is reachable; `503 → status: degraded` if not. Includes `status`, `grpc`, `adapters`, `adapter_results` (per-adapter ok/down/skipped), `adapter_details` (per-adapter human-readable), `loaded_adapters`. |
+| `/health` | GET | JSON. `200 → status: ok` if gRPC server is up and at least one LLM adapter is reachable; `503 → status: degraded` if not. Includes `status`, `grpc`, `adapters`, `adapter_results` (per-adapter ok/down/skipped), `adapter_details` (per-adapter human-readable), `loaded_adapters`, `deep_probe` (ok/degraded/unknown), `deep_probe_results` (per-adapter ok/down from the synthetic 1-token probe, OBSERVABILITY_AUDIT_REPORT.md §3.2 — informational only, never flips `status`/HTTP code). |
 | `/metrics` | GET | Prometheus text format (`prometheus_client`). Counters: `llm_requests_total`, `llm_errors_total`, `llm_tokens_total`, `grpc_requests_total`, `auth_errors_total`, `health_check_total`. Histograms: `llm_request_duration_seconds`, `grpc_request_duration_seconds`. Gauges: `active_requests`. |
 
 Port is configurable via the `HEALTH_PORT` env var (default: `8084`).
@@ -319,6 +319,7 @@ Optional:
 | `GRPC_MAX_CONCURRENT_RPCS` | `32` | Server `maximum_concurrent_rpcs` (R3) |
 | `GRPC_MAX_WORKERS` | `16` | Thread pool `max_workers` for gRPC (R6) |
 | `HEALTH_CACHE_TTL_S` | `20` | Health cache TTL in seconds (R2) |
+| `HEALTH_DEEP_PROBE_INTERVAL_S` | `60` | Interval between synthetic 1-token `Ask()` deep-probe sweeps per adapter (OBSERVABILITY_AUDIT_REPORT.md §3.2) |
 | `MAX_QUESTION_LENGTH` | `32000` | Max question chars; longer → `INVALID_ARGUMENT` (R8) |
 | `REQUEST_BUDGET_S` | `45.0` | Per-request LLM budget in seconds (R4) |
 | `FALLBACK_CHAIN` | `opencode0,opencode1,opencode2,mistral,ollama` | Comma-separated fallback order (R5) |

@@ -153,6 +153,7 @@ def main():
         adapter_names=list(adapters.keys()) + ["embedding"],
         grpc_server=grpc_server,
         adapter_details=adapter_details,
+        llm_adapters=adapters,
     )
 
     health_port = int(os.getenv("HEALTH_PORT", "8084"))

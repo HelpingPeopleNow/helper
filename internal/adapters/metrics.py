@@ -85,6 +85,20 @@ active_requests = Gauge(
 
 
 # ---------------------------------------------------------------------------
+# 6. Deep health probe gauge (OBSERVABILITY_AUDIT_REPORT.md §3.2)
+# ---------------------------------------------------------------------------
+# Distinct from health_check_total: this reflects a real, cheap (1-token)
+# completion call per provider on a longer interval, so a Cloudflare WAF or
+# IP block on the completion route (which leaves /models or /api/tags open)
+# surfaces here even though the shallow health_check_total checks stay "ok".
+helper_deep_probe_success = Gauge(
+    "helper_deep_probe_success",
+    "Whether the synthetic 1-token Ask() deep probe succeeded for a provider (1=ok, 0=failed)",
+    ["provider"],
+)
+
+
+# ---------------------------------------------------------------------------
 # Helper: classify exceptions into error_type labels (R10)
 # ---------------------------------------------------------------------------
 def classify_error(exc: Exception) -> str:
