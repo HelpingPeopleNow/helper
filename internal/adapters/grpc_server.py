@@ -327,6 +327,21 @@ _deep_probe_lock = threading.Lock()
 _deep_probe_results: dict[str, bool] = {}
 
 
+def _deep_probe_rate_limited(exc: Exception) -> bool:
+    """True when the provider answered but rejected the call due to quota.
+
+    A 429 means the completion route is reachable (the probe's goal); it must
+    not page as HelperDeepProbeFailed or the 60s probe burns free-tier RPD.
+    """
+    msg = str(exc).lower()
+    return (
+        "429" in msg
+        or "rate limit" in msg
+        or "rate_limit" in msg
+        or "resource_exhausted" in msg
+    )
+
+
 def _run_deep_probe(
     adapters: dict[str, "LLMPort"],
     provider_source: EnabledProvidersSource | None = None,
@@ -353,9 +368,18 @@ def _run_deep_probe(
             results[name] = True
             helper_deep_probe_success.labels(provider=name).set(1)
         except Exception as exc:
-            logger.warning("deep probe failed provider=%s error=%s", name, exc)
-            results[name] = False
-            helper_deep_probe_success.labels(provider=name).set(0)
+            if _deep_probe_rate_limited(exc):
+                logger.warning(
+                    "deep probe rate-limited provider=%s (treating as ok): %s",
+                    name,
+                    exc,
+                )
+                results[name] = True
+                helper_deep_probe_success.labels(provider=name).set(1)
+            else:
+                logger.warning("deep probe failed provider=%s error=%s", name, exc)
+                results[name] = False
+                helper_deep_probe_success.labels(provider=name).set(0)
     with _deep_probe_lock:
         _deep_probe_results.clear()
         _deep_probe_results.update(results)

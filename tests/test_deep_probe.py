@@ -64,3 +64,17 @@ class TestRunDeepProbeScoping:
         assert results == {"groq": True}
         groq.complete.assert_called_once()
         adapters["opencode0"].complete.assert_not_called()
+
+    def test_rate_limit_counts_as_probe_success(self) -> None:
+        groq = MagicMock(
+            side_effect=RuntimeError(
+                "Error code: 429 - {'error': {'code': 'rate_limit_exceeded'}}"
+            )
+        )
+        adapters = {"groq": groq}
+        source = ep.EnabledProvidersSource("http://backend/internal/llm-providers")
+        with patch.object(source, "fetch", return_value=["groq"]):
+            results = gs._run_deep_probe(adapters, source)
+
+        assert results == {"groq": True}
+        assert gs.helper_deep_probe_success.labels(provider="groq")._value.get() == 1.0
