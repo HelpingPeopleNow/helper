@@ -19,6 +19,7 @@ from internal.adapters.embedding_provider import (
     EmbeddingProvider,
     DimensionMismatchError,
 )
+from internal.adapters.enabled_providers import EnabledProvidersSource, resolve_deep_probe_targets
 from internal.adapters.metrics import (
     active_requests,
     auth_errors_total,
@@ -326,17 +327,26 @@ _deep_probe_lock = threading.Lock()
 _deep_probe_results: dict[str, bool] = {}
 
 
-def _run_deep_probe(adapters: dict[str, "LLMPort"]) -> dict[str, bool]:
-    """Run a synthetic 1-token completion against every registered chat
-    adapter and record pass/fail into helper_deep_probe_success{provider}.
+def _run_deep_probe(
+    adapters: dict[str, "LLMPort"],
+    provider_source: EnabledProvidersSource | None = None,
+) -> dict[str, bool]:
+    """Run a synthetic 1-token completion against admin-enabled chat
+    adapters and record pass/fail into helper_deep_probe_success{provider}.
 
-    Ollama is skipped when OLLAMA_BASE_URL is unset -- mirrors the
-    "optional/local" treatment already applied to Ollama in
-    _check_ollama_embedding (host-side dependency, not always present).
+    Providers disabled in the admin panel are marked healthy (1) so
+    HelperDeepProbeFailed only pages for models the app actually uses.
+    When the backend list is empty/unset, FALLBACK_CHAIN is used (same
+    as chat). Ollama is skipped when OLLAMA_BASE_URL is unset.
     """
+    admin_providers = provider_source.fetch() if provider_source else None
+    probe_targets = set(resolve_deep_probe_targets(adapters, admin_providers))
     results: dict[str, bool] = {}
     for name, adapter in adapters.items():
         if name == "ollama" and not os.getenv("OLLAMA_BASE_URL", "").strip():
+            continue
+        if name not in probe_targets:
+            helper_deep_probe_success.labels(provider=name).set(1)
             continue
         try:
             adapter.complete(system_prompt=_DEEP_PROBE_PROMPT, user=_DEEP_PROBE_USER)
@@ -352,11 +362,14 @@ def _run_deep_probe(adapters: dict[str, "LLMPort"]) -> dict[str, bool]:
     return results
 
 
-def _deep_probe_loop(adapters: dict[str, "LLMPort"]) -> None:
+def _deep_probe_loop(
+    adapters: dict[str, "LLMPort"],
+    provider_source: EnabledProvidersSource | None = None,
+) -> None:
     while True:
         time.sleep(_HEALTH_DEEP_PROBE_INTERVAL_S)
         try:
-            _run_deep_probe(adapters)
+            _run_deep_probe(adapters, provider_source)
         except Exception:
             logger.exception("deep probe loop iteration failed")
 
@@ -567,11 +580,19 @@ def configure_health_handler(
     logger.info("health cache background refresh started (ttl=%.0fs)", _HEALTH_CACHE_TTL_S)
 
     if llm_adapters:
-        dt = threading.Thread(target=_deep_probe_loop, args=(llm_adapters,), daemon=True)
+        providers_url = os.getenv("BACKEND_LLM_PROVIDERS_URL", "").strip()
+        provider_source = EnabledProvidersSource(providers_url)
+        dt = threading.Thread(
+            target=_deep_probe_loop,
+            args=(llm_adapters, provider_source),
+            daemon=True,
+        )
         dt.start()
         logger.info(
-            "deep probe background loop started (interval=%.0fs, adapters=%s)",
-            _HEALTH_DEEP_PROBE_INTERVAL_S, list(llm_adapters.keys()),
+            "deep probe background loop started (interval=%.0fs, loaded=%s, admin_url=%s)",
+            _HEALTH_DEEP_PROBE_INTERVAL_S,
+            list(llm_adapters.keys()),
+            providers_url or "(fallback chain only)",
         )
 
 
