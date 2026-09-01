@@ -75,14 +75,14 @@ class HelperAgent:
         self._adapters = adapters
         logger.info("HelperAgent: %d adapters loaded", len(adapters))
 
-    def answer(self, question: Question, system_prompt: str, history: tuple[Message, ...] = (), llm_provider: str = "", skip_role_detection: bool = False, deadline_s: float | None = None) -> Answer:
+    def answer(self, question: Question, system_prompt: str, history: tuple[Message, ...] = (), enabled_providers: list[str] | None = None, skip_role_detection: bool = False, deadline_s: float | None = None) -> Answer:
         active_requests.inc()
         try:
-            return self._answer_inner(question, system_prompt, history, llm_provider, skip_role_detection, deadline_s)
+            return self._answer_inner(question, system_prompt, history, enabled_providers, skip_role_detection, deadline_s)
         finally:
             active_requests.dec()
 
-    def _answer_inner(self, question: Question, system_prompt: str, history: tuple[Message, ...], llm_provider: str, skip_role_detection: bool, deadline_s: float | None = None) -> Answer:
+    def _answer_inner(self, question: Question, system_prompt: str, history: tuple[Message, ...], enabled_providers: list[str] | None, skip_role_detection: bool, deadline_s: float | None = None) -> Answer:
         # R4: compute per-request budget from the tighter of the global budget
         # and the client gRPC deadline. `deadline_s=0` means "no time left" (break
         # immediately), so check `is not None` (not truthiness) to avoid the
@@ -90,10 +90,10 @@ class HelperAgent:
         budget = min(self.REQUEST_BUDGET_S, deadline_s) if deadline_s is not None else self.REQUEST_BUDGET_S
         started = time.monotonic()
 
-        if llm_provider:
-            providers_chain = [llm_provider] + [p for p in self.FALLBACK_CHAIN if p != llm_provider]
+        if enabled_providers:
+            providers_chain = enabled_providers          # exact list, no implicit extras
         else:
-            providers_chain = self.FALLBACK_CHAIN
+            providers_chain = list(self.FALLBACK_CHAIN)  # copy to avoid mutation
 
         if skip_role_detection:
             user_text = question.text

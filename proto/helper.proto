@@ -24,7 +24,7 @@ message AskRequest {
   string question = 1;
   repeated Message history = 2;
   string system_prompt = 3;  // loaded by backend, provided on every call
-  string llm_provider = 4;   // "ollama" | "opencode" | "" (= use env default, set by admin)
+  repeated string enabled_providers = 4;  // empty = use env default fallback chain; non-empty = exact chain
   bool skip_role_detection = 5;  // if true, don't append JSON role-detection instructions
 }
 

@@ -96,10 +96,10 @@ class HelperServicer(helper_pb2_grpc.HelperServiceServicer):
         start = time.monotonic()
         history_len = len(request.history)
         system_prompt = request.system_prompt
-        llm_provider = request.llm_provider
+        enabled_providers = list(request.enabled_providers)  # repeated string → list
         skip_role_detection = request.skip_role_detection
-        logger.info("gRPC Ask: q_len=%d history=%d sp_len=%d provider=%s skip_role=%s",
-                     len(request.question), history_len, len(system_prompt), llm_provider or "(env default)", skip_role_detection)
+        logger.info("gRPC Ask: q_len=%d history=%d sp_len=%d providers=%s skip_role=%s",
+                     len(request.question), history_len, len(system_prompt), enabled_providers or "(env default)", skip_role_detection)
 
         try:
             history = tuple(
@@ -112,7 +112,7 @@ class HelperServicer(helper_pb2_grpc.HelperServiceServicer):
                 Question(text=request.question),
                 system_prompt=system_prompt,
                 history=history,
-                llm_provider=llm_provider,
+                enabled_providers=enabled_providers,
                 skip_role_detection=skip_role_detection,
                 deadline_s=deadline_s,
             )

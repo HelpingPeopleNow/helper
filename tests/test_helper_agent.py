@@ -51,43 +51,40 @@ class TestFallbackChainOrder:
         # Note: a real process restart would re-evaluate HelperAgent.FALLBACK_CHAIN
         # at class definition; we simulate by reading the env.
 
-    def test_explicit_provider_promoted_to_front(self) -> None:
-        """#11: explicit llm_provider starts the chain; original chain minus it follows."""
+    def test_explicit_providers_used_as_exact_chain(self) -> None:
+        """#11: enabled_providers list is used as the exact chain (no implicit extras)."""
         agent = HelperAgent(adapters={"opencode0": _Stub(), "ollama": _Stub(), "mistral": _Stub()})
-        # We exercise _answer_inner indirectly by capturing the chain via a probe
-        # The simplest way is to call answer() and observe the order of calls
         order: list[str] = []
         for name in ("opencode0", "ollama", "mistral"):
             adapter = _Stub(on_call=lambda *a, _n=name, **kw: order.append(_n) or "ok")
             agent._adapters[name] = adapter
-        agent.answer(Question("hi"), system_prompt="sp", llm_provider="ollama")
-        # ollama should be first (explicit), then FALLBACK_CHAIN minus ollama
+        agent.answer(Question("hi"), system_prompt="sp", enabled_providers=["ollama", "mistral"])
+        # only the listed providers are tried; ollama first
         assert order[0] == "ollama"
-        # ollama should not appear twice
         assert order.count("ollama") == 1
 
-    def test_explicit_provider_not_in_tail(self) -> None:
-        """#16b: leading provider is removed from the trailing fallback list."""
+    def test_explicit_providers_exact_no_extras(self) -> None:
+        """#16b: providers not in the list are never tried."""
         agent = HelperAgent(adapters={"opencode0": _Stub(), "ollama": _Stub(), "mistral": _Stub()})
         order: list[str] = []
         for name in ("opencode0", "ollama", "mistral"):
             agent._adapters[name] = _Stub(on_call=lambda *a, _n=name, **kw: order.append(_n) or "ok")
-        agent.answer(Question("hi"), system_prompt="sp", llm_provider="opencode0")
-        assert order.count("opencode0") == 1
+        agent.answer(Question("hi"), system_prompt="sp", enabled_providers=["opencode0"])
+        assert order == ["opencode0"]
 
     def test_explicit_provider_not_loaded_still_continues(self) -> None:
-        """#13: explicit provider with no adapter is skipped; chain continues."""
+        """#13: provider not in _adapters is skipped; chain continues to next."""
         agent = HelperAgent(adapters={"ollama": _Stub()})
         agent._adapters["ollama"] = _Stub(on_call=lambda *a, **kw: "ok")
-        # "opencode0" is not in _adapters; should be skipped
-        result = agent.answer(Question("hi"), system_prompt="sp", llm_provider="opencode0")
+        # "opencode0" is not in _adapters; should be skipped, ollama handles it
+        result = agent.answer(Question("hi"), system_prompt="sp", enabled_providers=["opencode0", "ollama"])
         assert result.text == "ok"
 
-    def test_empty_provider_treated_as_auto(self) -> None:
-        """#14: empty string falls into the else branch (uses FALLBACK_CHAIN)."""
+    def test_empty_providers_treated_as_auto(self) -> None:
+        """#14: None/empty list falls back to FALLBACK_CHAIN."""
         agent = HelperAgent(adapters={"ollama": _Stub()})
         agent._adapters["ollama"] = _Stub(on_call=lambda *a, **kw: "ok")
-        result = agent.answer(Question("hi"), system_prompt="sp", llm_provider="")
+        result = agent.answer(Question("hi"), system_prompt="sp", enabled_providers=None)
         assert result.text == "ok"
 
 

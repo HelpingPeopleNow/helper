@@ -15,18 +15,18 @@ class Message(_message.Message):
     def __init__(self, role: _Optional[str] = ..., content: _Optional[str] = ...) -> None: ...
 
 class AskRequest(_message.Message):
-    __slots__ = ("question", "history", "system_prompt", "llm_provider", "skip_role_detection")
+    __slots__ = ("question", "history", "system_prompt", "enabled_providers", "skip_role_detection")
     QUESTION_FIELD_NUMBER: _ClassVar[int]
     HISTORY_FIELD_NUMBER: _ClassVar[int]
     SYSTEM_PROMPT_FIELD_NUMBER: _ClassVar[int]
-    LLM_PROVIDER_FIELD_NUMBER: _ClassVar[int]
+    ENABLED_PROVIDERS_FIELD_NUMBER: _ClassVar[int]
     SKIP_ROLE_DETECTION_FIELD_NUMBER: _ClassVar[int]
     question: str
     history: _containers.RepeatedCompositeFieldContainer[Message]
     system_prompt: str
-    llm_provider: str
+    enabled_providers: _containers.RepeatedScalarFieldContainer[str]
     skip_role_detection: bool
-    def __init__(self, question: _Optional[str] = ..., history: _Optional[_Iterable[_Union[Message, _Mapping]]] = ..., system_prompt: _Optional[str] = ..., llm_provider: _Optional[str] = ..., skip_role_detection: _Optional[bool] = ...) -> None: ...
+    def __init__(self, question: _Optional[str] = ..., history: _Optional[_Iterable[_Union[Message, _Mapping]]] = ..., system_prompt: _Optional[str] = ..., enabled_providers: _Optional[_Iterable[str]] = ..., skip_role_detection: _Optional[bool] = ...) -> None: ...
 
 class AskResponse(_message.Message):
     __slots__ = ("answer", "detected_role")
