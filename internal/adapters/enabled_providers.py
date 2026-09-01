@@ -13,14 +13,17 @@ from urllib.request import Request, urlopen
 
 logger = logging.getLogger(__name__)
 
-DEFAULT_FALLBACK_CHAIN = tuple(
-    p.strip()
-    for p in os.getenv(
-        "FALLBACK_CHAIN",
-        "groq,openrouter,opencode0,opencode1,opencode2,mistral,ollama",
-    ).split(",")
-    if p.strip()
-)
+
+def fallback_chain() -> list[str]:
+    """Return the env-configured fallback chain (read at call time for tests)."""
+    return [
+        p.strip()
+        for p in os.getenv(
+            "FALLBACK_CHAIN",
+            "groq,openrouter,opencode0,opencode1,opencode2,mistral,ollama",
+        ).split(",")
+        if p.strip()
+    ]
 
 
 class EnabledProvidersSource:
@@ -57,5 +60,5 @@ def resolve_deep_probe_targets(
     if admin_providers:
         chain = admin_providers
     else:
-        chain = list(DEFAULT_FALLBACK_CHAIN)
+        chain = fallback_chain()
     return [name for name in chain if name in adapters]

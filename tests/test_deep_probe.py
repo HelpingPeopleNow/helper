@@ -35,29 +35,32 @@ class TestResolveDeepProbeTargets:
 
 class TestRunDeepProbeScoping:
     def test_skips_disabled_providers_and_marks_them_ok(self) -> None:
-        ok = MagicMock()
+        groq = MagicMock()
+        openrouter = MagicMock()
         bad = MagicMock(side_effect=RuntimeError("down"))
         adapters = {
-            "groq": ok,
-            "openrouter": ok,
+            "groq": groq,
+            "openrouter": openrouter,
             "opencode0": bad,
         }
-        source = ep.EnabledProvidersSource("")
+        source = ep.EnabledProvidersSource("http://backend/internal/llm-providers")
         with patch.object(source, "fetch", return_value=["groq", "openrouter"]):
             results = gs._run_deep_probe(adapters, source)
 
         assert results == {"groq": True, "openrouter": True}
-        ok.assert_called()
-        bad.assert_not_called()
+        groq.complete.assert_called_once()
+        openrouter.complete.assert_called_once()
+        bad.complete.assert_not_called()
         assert gs.helper_deep_probe_success.labels(provider="opencode0")._value.get() == 1.0
 
     def test_probes_fallback_chain_when_admin_empty(self, monkeypatch: pytest.MonkeyPatch) -> None:
         monkeypatch.setenv("FALLBACK_CHAIN", "groq,ollama")
-        ok = MagicMock()
-        adapters = {"groq": ok, "opencode0": MagicMock(side_effect=RuntimeError("down"))}
-        source = ep.EnabledProvidersSource("")
+        groq = MagicMock()
+        adapters = {"groq": groq, "opencode0": MagicMock(side_effect=RuntimeError("down"))}
+        source = ep.EnabledProvidersSource("http://backend/internal/llm-providers")
         with patch.object(source, "fetch", return_value=[]):
             results = gs._run_deep_probe(adapters, source)
 
         assert results == {"groq": True}
-        adapters["opencode0"].assert_not_called()
+        groq.complete.assert_called_once()
+        adapters["opencode0"].complete.assert_not_called()
